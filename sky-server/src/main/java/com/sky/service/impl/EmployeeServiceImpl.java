@@ -1,7 +1,10 @@
 package com.sky.service.impl;
 
 import com.sky.constant.MessageConstant;
+import com.sky.constant.PasswordConstant;
 import com.sky.constant.StatusConstant;
+import com.sky.context.BaseContext;
+import com.sky.dto.EmployeeDTO;
 import com.sky.dto.EmployeeLoginDTO;
 import com.sky.entity.Employee;
 import com.sky.exception.AccountLockedException;
@@ -9,10 +12,13 @@ import com.sky.exception.AccountNotFoundException;
 import com.sky.exception.PasswordErrorException;
 import com.sky.mapper.EmployeeMapper;
 import com.sky.service.EmployeeService;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
+
+import java.time.LocalDateTime;
 
 @Service
 public class EmployeeServiceImpl implements EmployeeService {
@@ -41,10 +47,9 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
 
         //密码比对
-        // TODO 这里仅仅对登录时的密码进行了比对，还需要在注册时将密码加密存储
-        // 对前端传过来的密码进行md5加密
+        // 对前端传过来的密码进行BCrypt加密
 
-        // 使用 matches 方法：它会自动从数据库密文中提取盐，并对输入密码进行加盐哈希核对
+        // 使用 matches 方法：它会自动从数据库密文(存储的密码)中提取盐，并对输入密码进行加盐哈希核对
         if (!passwordEncoder.matches(password,employee.getPassword())) {
             //密码错误
             throw new PasswordErrorException(MessageConstant.PASSWORD_ERROR);
@@ -57,6 +62,34 @@ public class EmployeeServiceImpl implements EmployeeService {
 
         //3、返回实体对象
         return employee;
+    }
+
+    /**
+     * 新增员工
+     * @param employeeDTO
+     * @return
+     */
+    @Override
+    public int save(EmployeeDTO employeeDTO) {
+
+        Employee employee = new Employee();
+        // 对象属性拷贝
+        BeanUtils.copyProperties(employeeDTO,employee);
+
+        // 拷贝过来还有一些属性没有设置，设置对象其他属性
+        // 设置账号初始状态
+        employee.setStatus(StatusConstant.ENABLE);
+        // 设置账号密码,默认123456，需要使用BCrypt加密存储
+        employee.setPassword(passwordEncoder.encode(PasswordConstant.DEFAULT_PASSWORD));
+        // 设置创建和更新时间
+        employee.setCreateTime(LocalDateTime.now());
+        employee.setUpdateTime(LocalDateTime.now());
+
+        // 设置当前记录创建人id和修改人id
+        Long currentId = BaseContext.getCurrentId();
+        employee.setCreateUser(currentId);
+        employee.setUpdateUser(currentId);
+        return employeeMapper.save(employee);
     }
 
 }

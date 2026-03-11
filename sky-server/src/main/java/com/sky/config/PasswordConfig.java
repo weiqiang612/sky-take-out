@@ -14,6 +14,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Configuration
 @Slf4j
+/**
+ * BCrypt配置类
+ */
 public class PasswordConfig {
     @Bean
     public PasswordEncoder passwordEncoder(){
