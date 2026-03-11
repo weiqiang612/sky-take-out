@@ -101,4 +101,17 @@ public class EmployeeController {
         return Result.success(result);
     }
 
+    /**
+     * 启用禁用员工账号
+     * @param status
+     * @param id
+     * @return
+     */
+    @PostMapping("/status/{status}")
+    public Result startOrStop(@PathVariable Integer status, @RequestParam("id")Long id){
+        log.info("启用禁用员工账号：{},{}",status,id);
+        boolean success = employeeService.startOrStop(status,id);
+        return success ? Result.success() : Result.error("操作失败！");
+    }
+
 }

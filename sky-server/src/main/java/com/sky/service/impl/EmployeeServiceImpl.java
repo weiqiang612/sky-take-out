@@ -54,7 +54,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         // 对前端传过来的密码进行BCrypt加密
 
         // 使用 matches 方法：它会自动从数据库密文(存储的密码)中提取盐，并对输入密码进行加盐哈希核对
-        if (!passwordEncoder.matches(password,employee.getPassword())) {
+        if (!passwordEncoder.matches(password, employee.getPassword())) {
             //密码错误
             throw new PasswordErrorException(MessageConstant.PASSWORD_ERROR);
         }
@@ -70,6 +70,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     /**
      * 新增员工
+     *
      * @param employeeDTO
      * @return
      */
@@ -78,7 +79,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
         Employee employee = new Employee();
         // 对象属性拷贝
-        BeanUtils.copyProperties(employeeDTO,employee);
+        BeanUtils.copyProperties(employeeDTO, employee);
 
         // 拷贝过来还有一些属性没有设置，设置对象其他属性
         // 设置账号初始状态
@@ -102,10 +103,32 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Override
     public PageResult page(EmployeePageQueryDTO employeePageQueryDTO) {
         // 设置分页参数
-        PageHelper.startPage(employeePageQueryDTO.getPage(),employeePageQueryDTO.getPageSize());
+        PageHelper.startPage(employeePageQueryDTO.getPage(), employeePageQueryDTO.getPageSize());
         // 执行分页查询，返回 Page<Employee> 对象
         Page<Employee> page = employeeMapper.pageQuery(employeePageQueryDTO);
-        return new PageResult(page.getTotal(),page.getResult());
+        return new PageResult(page.getTotal(), page.getResult());
+    }
+
+    /**
+     * 启用禁用员工账号
+     *
+     * @param status
+     * @param id
+     * @return
+     */
+    @Override
+    public boolean startOrStop(Integer status, Long id) {
+//        if (status == 0) {
+//            return employeeMapper.setStatus(1, id) > 0;
+//        } else {
+//            return employeeMapper.setStatus(0,id) > 0;
+//        }
+        Employee employee = Employee.builder()
+                .status(status)
+                .id(id)
+                .build();
+        // 修改成功返回大于0值
+        return employeeMapper.update(employee) > 0;
     }
 
 }
