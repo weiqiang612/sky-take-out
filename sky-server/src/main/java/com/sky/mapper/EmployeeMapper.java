@@ -2,9 +2,11 @@ package com.sky.mapper;
 
 import com.github.pagehelper.Page;
 import com.sky.dto.EmployeePageQueryDTO;
+import com.sky.dto.PasswordEditDTO;
 import com.sky.entity.Employee;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -49,4 +51,13 @@ public interface EmployeeMapper {
      */
     @Select("select * from employee where id = #{id}")
     Employee getByID(Long id);
+
+    /**
+     * 修改员工密码
+     * @param empId
+     * @param newPassword
+     * @return
+     */
+    @Update("update employee set password = #{newPassword} where id = #{empId}")
+    int editPassword(@Param("empId") Long empId, @Param("newPassword") String newPassword);
 }

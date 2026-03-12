@@ -9,6 +9,7 @@ import com.sky.context.BaseContext;
 import com.sky.dto.EmployeeDTO;
 import com.sky.dto.EmployeeLoginDTO;
 import com.sky.dto.EmployeePageQueryDTO;
+import com.sky.dto.PasswordEditDTO;
 import com.sky.entity.Employee;
 import com.sky.exception.AccountLockedException;
 import com.sky.exception.AccountNotFoundException;
@@ -21,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
+import sun.security.util.Password;
 
 import java.time.LocalDateTime;
 
@@ -152,6 +154,28 @@ public class EmployeeServiceImpl implements EmployeeService {
         // 设置更改时间
         employee.setUpdateTime(LocalDateTime.now());
         return employeeMapper.update(employee) > 0;
+    }
+
+    /**
+     * 修改员工密码
+     * @param passwordEditDTO
+     * @return
+     */
+    @Override
+    public boolean editPassword(PasswordEditDTO passwordEditDTO) {
+        String oldPassword = passwordEditDTO.getOldPassword();
+        // TODO 前端并没有用户ID传过来，后期再改一下，这里先用线程空间的ID
+        // 1. 查询数据库，将旧密码和数据库中的密码比对
+        Employee employee = employeeMapper.getByID(BaseContext.getCurrentId());
+        if (employee == null) {
+            throw new AccountNotFoundException("员工不存在"); // 抛出自定义异常或错误提示
+        }
+        if( !passwordEncoder.matches(oldPassword,employee.getPassword())){
+            throw new PasswordErrorException(MessageConstant.PASSWORD_ERROR);
+        }
+        // 2. 将新密码加密后存储到数据库中
+        String newPassword = passwordEncoder.encode(passwordEditDTO.getNewPassword());
+        return employeeMapper.editPassword(BaseContext.getCurrentId(),newPassword) > 0;
     }
 
 
