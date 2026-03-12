@@ -114,4 +114,27 @@ public class EmployeeController {
         return success ? Result.success() : Result.error("操作失败！");
     }
 
+    /**
+     * 根据id查询员工
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}")
+    public Result<Employee> getById(@PathVariable Long id){
+        log.info("根据ID查询员工：id为{}",id);
+        Employee employee = employeeService.queryById(id);
+        return Result.success(employee);
+    }
+
+    /**
+     * 修改员工信息
+     * @param employeeDTO
+     * @return
+     */
+    @PutMapping
+    public Result update(@RequestBody EmployeeDTO employeeDTO) {
+        log.info("修改用户信息");
+        Boolean success = employeeService.update(employeeDTO);
+        return success ? Result.success() : Result.error("操作失败！");
+    }
 }

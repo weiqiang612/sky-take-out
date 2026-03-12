@@ -118,11 +118,6 @@ public class EmployeeServiceImpl implements EmployeeService {
      */
     @Override
     public boolean startOrStop(Integer status, Long id) {
-//        if (status == 0) {
-//            return employeeMapper.setStatus(1, id) > 0;
-//        } else {
-//            return employeeMapper.setStatus(0,id) > 0;
-//        }
         Employee employee = Employee.builder()
                 .status(status)
                 .id(id)
@@ -130,5 +125,34 @@ public class EmployeeServiceImpl implements EmployeeService {
         // 修改成功返回大于0值
         return employeeMapper.update(employee) > 0;
     }
+
+    /**
+     * 根据员工ID查询
+     * @param id
+     * @return
+     */
+    @Override
+    public Employee queryById(Long id) {
+        Employee employee = employeeMapper.getByID(id);
+        employee.setPassword(null);
+        return employee;
+    }
+
+    /**
+     * 修改员工信息
+     * @param employeeDTO
+     * @return
+     */
+    @Override
+    public Boolean update(EmployeeDTO employeeDTO) {
+        Employee employee = new Employee();
+        BeanUtils.copyProperties(employeeDTO,employee);
+        // 设置更改人id
+        employee.setUpdateUser(BaseContext.getCurrentId());
+        // 设置更改时间
+        employee.setUpdateTime(LocalDateTime.now());
+        return employeeMapper.update(employee) > 0;
+    }
+
 
 }
