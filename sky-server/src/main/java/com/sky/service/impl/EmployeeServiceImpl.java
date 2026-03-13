@@ -88,14 +88,14 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setStatus(StatusConstant.ENABLE);
         // 设置账号密码,默认123456，需要使用BCrypt加密存储
         employee.setPassword(passwordEncoder.encode(PasswordConstant.DEFAULT_PASSWORD));
-        // 设置创建和更新时间
-        employee.setCreateTime(LocalDateTime.now());
-        employee.setUpdateTime(LocalDateTime.now());
-
-        // 设置当前记录创建人id和修改人id
-        Long currentId = BaseContext.getCurrentId();
-        employee.setCreateUser(currentId);
-        employee.setUpdateUser(currentId);
+//        // 设置创建和更新时间
+//        employee.setCreateTime(LocalDateTime.now());
+//        employee.setUpdateTime(LocalDateTime.now());
+//
+//        // 设置当前记录创建人id和修改人id
+//        Long currentId = BaseContext.getCurrentId();
+//        employee.setCreateUser(currentId);
+//        employee.setUpdateUser(currentId);
         return employeeMapper.save(employee);
     }
 
@@ -149,10 +149,10 @@ public class EmployeeServiceImpl implements EmployeeService {
     public Boolean update(EmployeeDTO employeeDTO) {
         Employee employee = new Employee();
         BeanUtils.copyProperties(employeeDTO,employee);
-        // 设置更改人id
-        employee.setUpdateUser(BaseContext.getCurrentId());
-        // 设置更改时间
-        employee.setUpdateTime(LocalDateTime.now());
+//        // 设置更改人id
+//        employee.setUpdateUser(BaseContext.getCurrentId());
+//        // 设置更改时间
+//        employee.setUpdateTime(LocalDateTime.now());
         return employeeMapper.update(employee) > 0;
     }
 
