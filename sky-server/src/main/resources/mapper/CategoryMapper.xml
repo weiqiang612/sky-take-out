@@ -49,4 +49,9 @@
         </if>
         order by sort asc,create_time desc
     </select>
+
+    <select id="getById" resultType="com.sky.entity.Category">
+        select * from category
+        where id = #{id}
+    </select>
 </mapper>

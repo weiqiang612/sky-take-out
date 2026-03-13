@@ -1,5 +1,6 @@
 package com.sky.controller.admin;
 
+import com.sky.constant.MessageConstant;
 import com.sky.result.Result;
 import com.sky.utils.AliOssUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ public class CommonController {
      */
     @PostMapping("/upload")
     public Result<String> upload(@RequestParam("file") MultipartFile file) {
+        log.info("文件上传：{}", file.getOriginalFilename());
         // 在Bucket上的储存路径
         // 目录
         String dir = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
@@ -46,7 +48,8 @@ public class CommonController {
             String upload = aliOssUtil.upload(file.getBytes(), objectName);
             return Result.success(upload);
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            log.error("文件上传失败，{}",e);
         }
+        return Result.error(MessageConstant.UPLOAD_FAILED);
     }
 }

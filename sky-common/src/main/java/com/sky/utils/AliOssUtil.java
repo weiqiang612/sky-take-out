@@ -4,9 +4,11 @@ import com.aliyun.oss.ClientException;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
+import com.aliyun.oss.model.ObjectMetadata;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+
 import java.io.ByteArrayInputStream;
 
 @Data
@@ -32,8 +34,18 @@ public class AliOssUtil {
         OSS ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
 
         try {
+
+            // 根据文件扩展名决定 Content-Type
+            String contentType = "image/jpg"; // 默认
+            if (objectName.endsWith(".png")) contentType = "image/png";
+            if (objectName.endsWith(".gif")) contentType = "image/gif";
+
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentType(contentType);
+
+            // 执行上传时带上 metadata
             // 创建PutObject请求。
-            ossClient.putObject(bucketName, objectName, new ByteArrayInputStream(bytes));
+            ossClient.putObject(bucketName, objectName, new ByteArrayInputStream(bytes), metadata);
         } catch (OSSException oe) {
             System.out.println("Caught an OSSException, which means your request made it to OSS, "
                     + "but was rejected with an error response for some reason.");
