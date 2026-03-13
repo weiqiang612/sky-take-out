@@ -11,6 +11,12 @@
     <artifactId>sky-server</artifactId>
     <dependencies>
 
+        <!-- oss -->
+        <dependency>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+        </dependency>
+
         <!-- aop -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
