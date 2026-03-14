@@ -5,6 +5,15 @@
         insert into dish(name, category_id, price, image, description, status, create_time, update_time, create_user, update_user)
         values (#{name},#{categoryId},#{price},#{image},#{description},#{status},#{createTime},#{updateTime},#{createUser},#{updateUser})
     </insert>
+
+    <delete id="deleteByIds">
+        delete from dish
+        where id in
+        <foreach collection="ids" item="id" open="(" close=")" separator=",">
+            #{id}
+        </foreach>
+    </delete>
+
     <select id="page" resultType="com.sky.vo.DishVO">
         SELECT d.*, c.name categoryName
         FROM dish d
@@ -22,5 +31,14 @@
             </if>
         </where>
         order by create_time desc
+    </select>
+
+    <select id="queryStatusesByIds" resultType="java.lang.Integer">
+        select status
+        from dish
+        where id in
+        <foreach collection="ids" item="id" open="(" close=")" separator=",">
+            #{id}
+        </foreach>
     </select>
 </mapper>

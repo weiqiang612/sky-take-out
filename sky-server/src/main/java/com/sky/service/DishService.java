@@ -8,6 +8,8 @@ import com.sky.vo.DishVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 /**
  * @author weiqiang
  * @version 1.0
@@ -28,4 +30,10 @@ public interface DishService {
      * @return
      */
     PageResult page(DishPageQueryDTO dishPageQueryDTO);
+
+    /**
+     * 批量删除菜品
+     * @param ids
+     */
+    void deleteBatch(List<Long> ids);
 }
