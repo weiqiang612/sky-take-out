@@ -2,6 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.annotation.AutoFill;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.dto.DishDTO;
@@ -10,6 +11,7 @@ import com.sky.entity.Category;
 import com.sky.entity.Dish;
 import com.sky.entity.DishFlavor;
 import com.sky.entity.SetmealDish;
+import com.sky.enumeration.OperationType;
 import com.sky.exception.CategoryNotExistException;
 import com.sky.exception.DeletionNotAllowedException;
 import com.sky.mapper.CategoryMapper;
@@ -26,6 +28,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -129,5 +132,50 @@ public class DishServiceImpl implements DishService {
         if (affectedRows != ids.size()) {
             throw new DeletionNotAllowedException("部分菜品删除失败，可能已被其他人处理");
         }
+    }
+
+    /**
+     * 修改菜品
+     * @param dishDTO
+     */
+    @Transactional
+    @Override
+    public void updateWithFlavor(DishDTO dishDTO) {
+        DishVO dishVO = dishMapper.getById(dishDTO.getId());
+        // TODO 修改菜品涉及到dish表，dish_flavor表，setmeal_dish表，需要事务，这里判断是否需要修改setmeal_dish表
+        boolean needUpdateSetmealDish = !dishVO.getName().equals(dishDTO.getName()) ||
+                dishVO.getPrice().compareTo(dishDTO.getPrice()) != 0;
+        // 1. 修改菜品表
+        Dish dish = new Dish();
+        BeanUtils.copyProperties(dishDTO,dish);
+        dishMapper.update(dish);
+        // 2. 修改菜品口味表（先删后增）
+        dishFlavorMapper.deleteByIds(Collections.singletonList(dishDTO.getId()));
+        List<DishFlavor> flavors = dishDTO.getFlavors();
+        if(flavors!=null && !flavors.isEmpty()){
+            // 前端并没有传入菜品id数据，需要手动赋值
+            flavors.forEach(f -> f.setDishId(dishDTO.getId()));
+            dishFlavorMapper.insertBatch(dishDTO.getFlavors());
+        }
+        // 3. 按需修改套餐菜品关联表
+        if (needUpdateSetmealDish) {
+            setmealDishMapper.updateDishData(dishDTO.getName(),dishDTO.getPrice(),dishDTO.getId());
+        }
+    }
+
+    /**
+     * 根据ID查询菜品
+     * @param id
+     * @return
+     */
+    @Override
+    public DishVO getByIdWithFlavor(Long id) {
+        // 1. 查询除菜品口味之外的其他数据
+        DishVO dishVO = dishMapper.getById(id);
+        // 2. 查询菜品口味数据
+        List<DishFlavor> dishFlavors = dishFlavorMapper.getById(id);
+        // 3. 将结果封装为DishVO对象返回
+        dishVO.setFlavors(dishFlavors);
+        return dishVO;
     }
 }

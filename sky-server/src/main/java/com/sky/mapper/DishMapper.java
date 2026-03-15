@@ -52,4 +52,18 @@ public interface DishMapper {
      * @return
      */
     int deleteByIds(List<Long> ids);
+
+    /**
+     * 查询返回除口味之外的数据
+     * @param id
+     * @return
+     */
+    DishVO getById(Long id);
+
+    /**
+     * 更新菜品表
+     * @param dish
+     */
+    @AutoFill(OperationType.UPDATE)
+    void update(Dish dish);
 }

@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
 <mapper namespace="com.sky.mapper.SetmealDishMapper">
+    <update id="updateDishData">
+        update setmeal_dish
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="price != null">price = #{price},</if>
+        </set>
+        <where>
+            <if test="dishId != null">and dish_id = #{dishId}</if>
+        </where>
+    </update>
 
     <select id="queryRelatedDishes" resultType="java.lang.Integer">
         select count(id)
