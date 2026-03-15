@@ -142,7 +142,6 @@ public class DishServiceImpl implements DishService {
     @Override
     public void updateWithFlavor(DishDTO dishDTO) {
         DishVO dishVO = dishMapper.getById(dishDTO.getId());
-        // TODO 修改菜品涉及到dish表，dish_flavor表，setmeal_dish表，需要事务，这里判断是否需要修改setmeal_dish表
         boolean needUpdateSetmealDish = !dishVO.getName().equals(dishDTO.getName()) ||
                 dishVO.getPrice().compareTo(dishDTO.getPrice()) != 0;
         // 1. 修改菜品表
