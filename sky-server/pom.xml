@@ -11,6 +11,12 @@
     <artifactId>sky-server</artifactId>
     <dependencies>
 
+        <!-- httpclient -->
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+        </dependency>
+
         <!-- oss -->
         <dependency>
             <groupId>com.aliyun.oss</groupId>
