@@ -72,7 +72,7 @@ public class DishController {
     }
 
     /**
-     * 根据ID查询菜品
+     * 根据菜品ID查询菜品
      * @param id
      * @return
      */

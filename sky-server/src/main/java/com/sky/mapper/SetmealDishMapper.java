@@ -1,5 +1,7 @@
 package com.sky.mapper;
 
+import com.sky.entity.SetmealDish;
+import com.sky.vo.DishItemVO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -29,4 +31,11 @@ public interface SetmealDishMapper {
      * @Param dishId
      */
     void updateDishData(@Param("name") String name,@Param("price") BigDecimal price,@Param("dishId") Long dishId);
+
+    /**
+     * 根据套餐ID查询相关菜品
+     * @param setmealId
+     * @return
+     */
+    List<DishItemVO> listSetmealDish(Long setmealId);
 }

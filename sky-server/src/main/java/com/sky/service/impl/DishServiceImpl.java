@@ -28,6 +28,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -54,6 +55,7 @@ public class DishServiceImpl implements DishService {
 
     /**
      * 新增菜品和对应口味
+     *
      * @param dishDTO
      * @return
      */
@@ -62,7 +64,7 @@ public class DishServiceImpl implements DishService {
     public void saveWithFlavor(DishDTO dishDTO) {
         Dish dish = new Dish();
 
-        BeanUtils.copyProperties(dishDTO,dish);
+        BeanUtils.copyProperties(dishDTO, dish);
         // 创建人、创建时间、更新人、更新时间赋值已被AOP增强
         // 1. 向菜品表插入一条数据
         int rows = dishMapper.save(dish);
@@ -77,7 +79,7 @@ public class DishServiceImpl implements DishService {
         // 如果商家将菜品的口味也填写了的话，需要将信息写到口味表，所以开启事务
         List<DishFlavor> flavors = dishDTO.getFlavors();
         int affectedFlavors = 0;
-        if(flavors!=null && !flavors.isEmpty()){
+        if (flavors != null && !flavors.isEmpty()) {
             // 建立逻辑外键关联
             flavors.forEach(f -> f.setDishId(dishId));
             dishFlavorMapper.insertBatch(flavors);
@@ -86,20 +88,22 @@ public class DishServiceImpl implements DishService {
 
     /**
      * 菜品分页查询
+     *
      * @param dishPageQueryDTO
      * @return
      */
     @Override
     public PageResult page(DishPageQueryDTO dishPageQueryDTO) {
         // 开启分页查询
-        PageHelper.startPage(dishPageQueryDTO.getPage(),dishPageQueryDTO.getPageSize());
+        PageHelper.startPage(dishPageQueryDTO.getPage(), dishPageQueryDTO.getPageSize());
 
         Page<DishVO> dishPage = dishMapper.page(dishPageQueryDTO);
-        return new PageResult(dishPage.getTotal(),dishPage.getResult());
+        return new PageResult(dishPage.getTotal(), dishPage.getResult());
     }
 
     /**
      * 批量删除菜品
+     *
      * @param ids
      */
     @Transactional
@@ -117,13 +121,13 @@ public class DishServiceImpl implements DishService {
         // 一次性查询所有菜品状态，如果有起售状态，则不允许删除
         List<Integer> statuses = dishMapper.queryStatusesByIds(ids);
         for (Integer status : statuses) {
-            if(status == StatusConstant.ENABLE){
+            if (status == StatusConstant.ENABLE) {
                 throw new DeletionNotAllowedException(MessageConstant.DISH_ON_SALE);
             }
         }
         // 一次性查询所有菜品套餐关联状态，如果有关联，则不允许删除
         Integer relatedDishesCount = setmealDishMapper.queryRelatedDishes(ids);
-        if (relatedDishesCount != 0){
+        if (relatedDishesCount != 0) {
             throw new DeletionNotAllowedException(MessageConstant.DISH_BE_RELATED_BY_SETMEAL);
         }
         // 当初添加菜品时，口味非必填项，返回值可以为0
@@ -136,6 +140,7 @@ public class DishServiceImpl implements DishService {
 
     /**
      * 修改菜品
+     *
      * @param dishDTO
      */
     @Transactional
@@ -146,24 +151,25 @@ public class DishServiceImpl implements DishService {
                 dishVO.getPrice().compareTo(dishDTO.getPrice()) != 0;
         // 1. 修改菜品表
         Dish dish = new Dish();
-        BeanUtils.copyProperties(dishDTO,dish);
+        BeanUtils.copyProperties(dishDTO, dish);
         dishMapper.update(dish);
         // 2. 修改菜品口味表（先删后增）
         dishFlavorMapper.deleteByIds(Collections.singletonList(dishDTO.getId()));
         List<DishFlavor> flavors = dishDTO.getFlavors();
-        if(flavors!=null && !flavors.isEmpty()){
+        if (flavors != null && !flavors.isEmpty()) {
             // 前端并没有传入菜品id数据，需要手动赋值
             flavors.forEach(f -> f.setDishId(dishDTO.getId()));
             dishFlavorMapper.insertBatch(dishDTO.getFlavors());
         }
         // 3. 按需修改套餐菜品关联表
         if (needUpdateSetmealDish) {
-            setmealDishMapper.updateDishData(dishDTO.getName(),dishDTO.getPrice(),dishDTO.getId());
+            setmealDishMapper.updateDishData(dishDTO.getName(), dishDTO.getPrice(), dishDTO.getId());
         }
     }
 
     /**
-     * 根据ID查询菜品
+     * 根据菜品ID查询菜品
+     *
      * @param id
      * @return
      */
@@ -176,5 +182,24 @@ public class DishServiceImpl implements DishService {
         // 3. 将结果封装为DishVO对象返回
         dishVO.setFlavors(dishFlavors);
         return dishVO;
+    }
+
+    /**
+     * 条件查询菜品和口味
+     *
+     * @param dish
+     * @return
+     */
+    @Override
+    public List<DishVO> listWithFlavors(Dish dish) {
+        List<DishVO> dishVOList;
+        dishVOList = dishMapper.list(dish);
+
+        // 遍历查询到的菜品，为对应菜品的口味赋值
+        for (DishVO dishVO : dishVOList) {
+            Long id = dishVO.getId();
+            dishVO.setFlavors(dishFlavorMapper.getById(id));
+        }
+        return dishVOList;
     }
 }

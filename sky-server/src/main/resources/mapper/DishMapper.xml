@@ -61,4 +61,16 @@
         ON d.category_id = c.id
         where d.id = #{id}
     </select>
+    <select id="list" resultType="com.sky.vo.DishVO">
+        SELECT d.*, c.name categoryName
+        FROM dish d
+        left outer join category c
+        ON d.category_id = c.id
+        <where>
+            and d.category_id = #{categoryId}
+            <if test="status != null">
+                and d.status = #{status}
+            </if>
+        </where>
+    </select>
 </mapper>
