@@ -23,4 +23,10 @@ public interface SetmealMapper {
      * @return
      */
     List<Setmeal> list(Setmeal setmeal);
+
+    /**
+     * 修改套餐
+     * @param setmeal
+     */
+    void update(Setmeal setmeal);
 }

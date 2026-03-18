@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -38,4 +39,11 @@ public interface SetmealDishMapper {
      * @return
      */
     List<DishItemVO> listSetmealDish(Long setmealId);
+
+    /**
+     * 根据菜品ID查询相关套餐
+     * @param dishIds
+     * @return
+     */
+    List<Long> getSetmealIdsByDishIds(ArrayList<Long> dishIds);
 }
