@@ -97,6 +97,18 @@ public class DishController {
 
 
     /**
+     * 根据分类ID查询菜品
+     * @param categoryId
+     * @return
+     */
+    @GetMapping("/list")
+    public Result<List<Dish>> listDish(Long categoryId) {
+        log.info("根据分类ID查询菜品：{}",categoryId);
+        List<Dish> dishes = dishService.listByCategoryId(categoryId);
+        return Result.success(dishes);
+    }
+
+    /**
      * 修改菜品
      *
      * @param dishDTO
@@ -118,6 +130,12 @@ public class DishController {
         return Result.success();
     }
 
+    /**
+     * 修改套餐起售停售状态
+     * @param status
+     * @param id
+     * @return
+     */
     @PostMapping("/status/{status}")
     public Result updateStatus(@PathVariable Integer status, @RequestParam Long id) {
         log.info("菜品起售停售，菜品id:{}，调整状态为：{}", id, status == 1 ? "起售" : "停售");

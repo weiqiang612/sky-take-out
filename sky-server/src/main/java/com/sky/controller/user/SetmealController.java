@@ -34,23 +34,23 @@ public class SetmealController {
     @GetMapping("/list")
     public Result<List<Setmeal>> list(@RequestParam Long categoryId) {
         log.info("用户端根据分类ID查询套餐中，分类ID：{}", categoryId);
-
-        Setmeal setmeal = new Setmeal();
-        setmeal.setCategoryId(categoryId);
-        setmeal.setStatus(StatusConstant.ENABLE);
-
+        Setmeal setmeal = Setmeal.builder()
+                .categoryId(categoryId)
+                .status(StatusConstant.ENABLE)
+                .build();
         List<Setmeal> list = setmealService.list(setmeal);
         return Result.success(list);
     }
 
     /**
      * 根据套餐ID查询相关菜品
+     *
      * @param id
      * @return
      */
     @GetMapping("/dish/{id}")
     public Result<List<DishItemVO>> listDishItem(@PathVariable Long id) {
-        log.info("根据套餐ID查询相应菜品接口，套餐id：{}",id);
+        log.info("根据套餐ID查询相应菜品接口，套餐id：{}", id);
         return Result.success(setmealService.listDishItem(id));
     }
 

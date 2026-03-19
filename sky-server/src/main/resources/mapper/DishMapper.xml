@@ -74,4 +74,9 @@
             </if>
         </where>
     </select>
+    <select id="listByCategoryId" resultType="com.sky.entity.Dish">
+        select *
+        from dish
+        where category_id = #{categoryID}
+    </select>
 </mapper>
