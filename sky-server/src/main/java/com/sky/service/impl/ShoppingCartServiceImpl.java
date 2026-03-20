@@ -3,6 +3,7 @@ package com.sky.service.impl;
 import com.sky.context.BaseContext;
 import com.sky.dto.ShoppingCartDTO;
 import com.sky.entity.ShoppingCart;
+import com.sky.exception.DeletionNotAllowedException;
 import com.sky.exception.ShoppingCartBusinessException;
 import com.sky.mapper.DishMapper;
 import com.sky.mapper.SetmealMapper;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -93,5 +95,59 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
         if (shoppingCart != null) {
             shoppingCartMapper.save(shoppingCart);
         }
+    }
+
+    /**
+     * 查看购物车
+     *
+     * @param id 用户ID
+     * @return
+     */
+    @Override
+    public List<ShoppingCart> list(Long id) {
+        ShoppingCart shoppingCart = ShoppingCart.builder()
+                .userId(id)
+                .build();
+        return shoppingCartMapper.list(shoppingCart);
+    }
+
+    /**
+     * 删除购物车商品
+     *
+     * @param shoppingCartDTO
+     */
+    @Override
+    public void remove(ShoppingCartDTO shoppingCartDTO) {
+        ShoppingCart shoppingCart = new ShoppingCart();
+        BeanUtils.copyProperties(shoppingCartDTO, shoppingCart);
+        Long userId = BaseContext.getCurrentId();
+        if (userId == null) {
+            throw new DeletionNotAllowedException("用户ID为null，不允许删除！");
+        }
+        shoppingCart.setUserId(userId);
+        // 1. 删除之前先查询一下，是否数量大于1，如果数量大于1，则将数量减1即可
+        List<ShoppingCart> list = shoppingCartMapper.list(shoppingCart);
+        if (list != null && !list.isEmpty()) {
+            ShoppingCart cart = list.get(0);
+            // 1.1 数量大于1，执行减1操作即可
+            if (cart.getNumber() > 1) {
+                shoppingCartMapper.updateNumberForGoods(cart.getNumber() - 1, cart.getId());
+                return;
+            }
+            shoppingCartMapper.remove(cart);
+        } else {
+            throw new DeletionNotAllowedException("购物车中没有该商品！");
+        }
+    }
+
+    /**
+     * 清空购物车
+     */
+    @Override
+    public void clean() {
+        ShoppingCart shoppingCart = new ShoppingCart();
+        shoppingCart.setUserId(BaseContext.getCurrentId());
+        // 直接删除即可，删除用户购物车是幂等操作
+        shoppingCartMapper.remove(shoppingCart);
     }
 }

@@ -47,4 +47,10 @@ public interface ShoppingCartMapper {
      * @return
      */
     List<ShoppingCart> list(ShoppingCart shoppingCart1);
+
+    /**
+     * 删除购物车商品
+     * @param shoppingCart
+     */
+    void remove(ShoppingCart shoppingCart);
 }
