@@ -4,6 +4,9 @@ import com.sky.dto.ShoppingCartDTO;
 import com.sky.entity.ShoppingCart;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
+
+import java.util.List;
 
 /**
  * @author weiqiang
@@ -32,10 +35,16 @@ public interface ShoppingCartMapper {
     /**
      * 更改当前用户购物车商品的数量，适用于商品数量不为0时，增加和删除商品的情况
      * @param newNumber
-     * @param shoppingCartDTO
-     * @param userId
+     * @param id 购物车id
      */
+    @Update("update shopping_cart set number = #{newNumber} where id = #{id}")
     void updateNumberForGoods(@Param("newNumber") Integer newNumber,
-                              @Param("shoppingCartDTO") ShoppingCartDTO shoppingCartDTO,
-                              @Param("userId") Long userId);
+                              @Param("id") Long id);
+
+    /**
+     * 查询购物车
+     * @param shoppingCart1
+     * @return
+     */
+    List<ShoppingCart> list(ShoppingCart shoppingCart1);
 }

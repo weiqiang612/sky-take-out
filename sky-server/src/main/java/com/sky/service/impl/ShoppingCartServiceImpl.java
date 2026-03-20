@@ -10,11 +10,13 @@ import com.sky.mapper.ShoppingCartMapper;
 import com.sky.service.ShoppingCartService;
 import com.sky.vo.DishVO;
 import com.sky.vo.SetmealVO;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * @author weiqiang
@@ -47,20 +49,26 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
             throw new ShoppingCartBusinessException("不可以一次添加多个菜品或套餐！");
         }
         Long userId = BaseContext.getCurrentId();
-        // 1. 查询当前选择添加的种类的数量
-        Integer oldNumber = shoppingCartMapper.countByDishORSetmealId(shoppingCartDTO, userId);
-        Integer newNumber = oldNumber + 1;
-        // 2. 当前种类菜品或套餐数量大于0，则只更新数量即可
-        if (oldNumber > 0) {
-            shoppingCartMapper.updateNumberForGoods(newNumber, shoppingCartDTO, userId);
+        // 1. 判断添加的菜品或套餐是否已经添加过
+        ShoppingCart shoppingCart1 = new ShoppingCart();
+        BeanUtils.copyProperties(shoppingCartDTO, shoppingCart1);
+        shoppingCart1.setUserId(userId);
+        List<ShoppingCart> list = shoppingCartMapper.list(shoppingCart1);
+        // 2. 当前种类菜品或套餐已经存在，则只更新数量即可
+        if (list != null && !list.isEmpty()) {
+            ShoppingCart cart = list.get(0);
+            // 若已存在套餐或菜品，则可按其id添加
+            shoppingCartMapper.updateNumberForGoods(cart.getNumber() + 1, cart.getId());
             return;
         }
+
+        // 2. 当前种类菜品或套餐数量大于0，则只更新数量即可
         // 3. 当前购物车中没有当前添加的套餐或菜品，则新插入表
         // 3.1 添加的是菜品，则按需添加菜品口味(条件插入即可)
         ShoppingCart shoppingCart = null;
         // 填充公共字段
         ShoppingCart.ShoppingCartBuilder builder = ShoppingCart.builder()
-                .number(newNumber)
+                .number(1)
                 .createTime(LocalDateTime.now());
         if (shoppingCartDTO.getDishId() != null) {
             DishVO dishVO = dishMapper.getById(shoppingCartDTO.getDishId());
