@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.sky.mapper.ShoppingCartMapper">
+    <insert id="save">
+        insert into shopping_cart(name, image, user_id, dish_id, setmeal_id, dish_flavor, number, amount, create_time) VALUES
+        (#{name},#{image},#{userId},#{dishId},#{setmealId},#{dishFlavor},#{number},#{amount},#{createTime})
+    </insert>
+    <update id="updateNumberForGoods">
+        update shopping_cart
+        set number = #{newNumber}
+        <where>
+            user_id = #{userId}
+            <if test="shoppingCartDTO.dishId != null">and dish_id = #{shoppingCartDTO.dishId}</if>
+            <if test="shoppingCartDTO.setmealId != null">and setmeal_id = #{shoppingCartDTO.setmealId}</if>
+            <if test="shoppingCartDTO.dishFlavor != null">and dish_flavor = #{shoppingCartDTO.dishFlavor}</if>
+        </where>
+    </update>
+    <select id="countByDishORSetmealId" resultType="java.lang.Integer">
+        select count(*)
+        from shopping_cart
+        <where>
+            user_id = #{userId}
+            <if test="shoppingCartDTO.dishId != null">and dish_id = #{shoppingCartDTO.dishId}</if>
+            <if test="shoppingCartDTO.setmealId != null">and setmeal_id = #{shoppingCartDTO.setmealId}</if>
+            <if test="shoppingCartDTO.dishFlavor != null">and dish_flavor = #{shoppingCartDTO.dishFlavor}</if>
+        </where>
+    </select>
+</mapper>
