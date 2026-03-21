@@ -15,16 +15,6 @@
             <if test="userId == null and dishId == null and setmealId == null">and 1 = 0</if>
         </where>
     </delete>
-    <select id="countByDishORSetmealId" resultType="java.lang.Integer">
-        select count(*)
-        from shopping_cart
-        <where>
-            user_id = #{userId}
-            <if test="shoppingCartDTO.dishId != null">and dish_id = #{shoppingCartDTO.dishId}</if>
-            <if test="shoppingCartDTO.setmealId != null">and setmeal_id = #{shoppingCartDTO.setmealId}</if>
-            <if test="shoppingCartDTO.dishFlavor != null">and dish_flavor = #{shoppingCartDTO.dishFlavor}</if>
-        </where>
-    </select>
     <select id="list" resultType="com.sky.entity.ShoppingCart">
         select *
         from shopping_cart

@@ -18,15 +18,6 @@ import java.util.List;
 public interface ShoppingCartMapper {
 
     /**
-     * 根据套餐或菜品ID查询当前用户的商品数量
-     * 注意：对不同口味的菜品作了区分
-     * @param shoppingCartDTO
-     * @param userId
-     * @return
-     */
-    Integer countByDishORSetmealId(@Param("shoppingCartDTO") ShoppingCartDTO shoppingCartDTO,@Param("userId") Long userId);
-
-    /**
      * 添加购物车
      * @param shoppingCart
      */
