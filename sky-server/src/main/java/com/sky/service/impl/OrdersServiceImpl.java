@@ -161,6 +161,10 @@ public class OrdersServiceImpl implements OrdersService {
         // 根据订单号查询订单
         Orders ordersDB = ordersMapper.getByNumber(outTradeNo);
 
+        if (Orders.PAID.equals(ordersDB.getPayStatus())){
+            throw new OrderBusinessException("订单已支付，请勿重复支付！");
+        }
+
         // 根据订单id更新订单的状态、支付方式、支付状态、结账时间
         Orders orders = Orders.builder()
                 .id(ordersDB.getId())
