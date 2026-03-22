@@ -83,9 +83,11 @@ public class OrdersServiceImpl implements OrdersService {
         }
 
         // 1. 向订单表插入一条数据
-        // 未处理字段：checkout_time 付款时间 、user_name 用户名 、cancel_time 取消时间、
+        // 未处理字段：checkout_time 付款时间、cancel_time 取消时间、
         // rejection_reason 拒单原因 、 cancel_reason 取消原因 、delivery_time 送达时间
+        User user = userMapper.getById(userId);
         Orders orders = Orders.builder()
+                .userName(user.getName())
                 .number(String.valueOf(System.currentTimeMillis()))
                 .status(Orders.PENDING_PAYMENT)
                 .userId(userId)
@@ -298,13 +300,54 @@ public class OrdersServiceImpl implements OrdersService {
 
         // 3. 检查订单支付状态，如果已支付需要退款，并将订单payStatus修改为退款
         Integer payStatus = ordersMapper.getPayStatus(id);
-        if (payStatus == Orders.PAID) {
+        if (Orders.PAID.equals(payStatus)) {
             Orders order = ordersMapper.getById(id);
             // 退款，测试环境不退款
 //            // 商户退款单号，测试环境不使用
 //            String outRefundNo = "";
 //            weChatPayUtil.refund(order.getNumber(),outRefundNo,order.getAmount(),order.getAmount());
             log.info("订单 {} 触发拒单退款逻辑，金额：{}", order.getNumber(), order.getAmount());
+            // 修改订单支付状态为已退款
+            order.setPayStatus(Orders.REFUND);
+            ordersMapper.update(order);
+        }
+    }
+
+    /**
+     * 取消订单
+     *
+     * @param ordersCancelDTO
+     */
+    @Transactional
+    @Override
+    public void cancel(OrdersCancelDTO ordersCancelDTO) {
+        Long id = ordersCancelDTO.getId();
+        // 1. 先查询订单状态，处理业务异常，只有3已接单 4派送中的订单才可以取消
+        Integer status = ordersMapper.getStatusById(id);
+        if (status == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+        // 只有已接单和派送中的订单可以取消
+        if (!Orders.CONFIRMED.equals(status) && !Orders.DELIVERY_IN_PROGRESS.equals(status)) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+        // 2.取消订单
+        ordersMapper.update(Orders.builder()
+                .id(id)
+                .status(Orders.CANCELLED)
+                .cancelReason(ordersCancelDTO.getCancelReason())
+                .cancelTime(LocalDateTime.now())
+                .build());
+
+        // 3. 检查订单支付状态，如果已支付需要退款，并将订单payStatus修改为退款
+        Integer payStatus = ordersMapper.getPayStatus(id);
+        if (Orders.PAID.equals(payStatus)) {
+            Orders order = ordersMapper.getById(id);
+            // 退款，测试环境不退款
+//            // 商户退款单号，测试环境不使用
+//            String outRefundNo = "";
+//            weChatPayUtil.refund(order.getNumber(),outRefundNo,order.getAmount(),order.getAmount());
+            log.info("订单 {} 触发取消订单退款逻辑，金额：{}", order.getNumber(), order.getAmount());
             // 修改订单支付状态为已退款
             order.setPayStatus(Orders.REFUND);
             ordersMapper.update(order);
