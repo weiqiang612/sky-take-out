@@ -3,11 +3,13 @@ package com.sky.service.impl;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
+import com.sky.constant.StatusConstant;
 import com.sky.dto.SetmealDTO;
 import com.sky.dto.SetmealPageQueryDTO;
 import com.sky.entity.Setmeal;
 import com.sky.entity.SetmealDish;
 import com.sky.exception.DeletionNotAllowedException;
+import com.sky.exception.SetmealEnableFailedException;
 import com.sky.mapper.DishMapper;
 import com.sky.mapper.SetmealDishMapper;
 import com.sky.mapper.SetmealMapper;
@@ -167,7 +169,19 @@ public class SetmealServiceImpl implements SetmealService {
     @CacheEvict(cacheNames = "setmealCache", allEntries = true)
     @Override
     public void updateStatus(Integer status, Long id) {
-        // TODO处理套餐菜品为空不能起售情况
+        List<SetmealDish> setmealDishes = setmealDishMapper.listDetailed(id);
+        if (setmealDishes == null && setmealDishes.isEmpty()) {
+            throw new SetmealEnableFailedException("套餐包含菜品为空，不能起售！");
+        }
+        ArrayList<Long> dishIds = new ArrayList<>(setmealDishes.size());
+        for (SetmealDish setmealDish : setmealDishes) {
+            dishIds.add(setmealDish.getDishId());
+        }
+        // 套餐内包含未起售菜品，不能起售
+        if (dishMapper.queryStatusesByIds(dishIds).contains(StatusConstant.DISABLE)){
+            throw new SetmealEnableFailedException(MessageConstant.SETMEAL_ENABLE_FAILED);
+        }
+
         Setmeal setmeal = Setmeal.builder()
                 .status(status)
                 .id(id)

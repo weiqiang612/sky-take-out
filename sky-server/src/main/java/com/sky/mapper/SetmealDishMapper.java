@@ -21,8 +21,8 @@ public interface SetmealDishMapper {
 
     /**
      * 查询多条菜品的关联数量
-     * @param ids
-     * @return
+     * @param ids 菜品ID
+     * @return 该菜品关联的套餐的数量
      */
     Integer queryRelatedDishes(List<Long> ids);
 
