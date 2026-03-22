@@ -2,6 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.constant.MessageConstant;
 import com.sky.dto.SetmealDTO;
 import com.sky.dto.SetmealPageQueryDTO;
 import com.sky.entity.Setmeal;
@@ -183,7 +184,7 @@ public class SetmealServiceImpl implements SetmealService {
         // 1. 对于套餐的删除操作，首先要确保套餐在停售状态，否则不予删除
         Integer count = setmealMapper.countEnabledSetmealByIds(ids);
         if (count > 0) {
-            throw new DeletionNotAllowedException("请先将套餐下架再删除！");
+            throw new DeletionNotAllowedException(MessageConstant.SETMEAL_ON_SALE);
         }
 
         // 2. 删除套餐之后，还需要相应的把相应的套餐菜品映射删除

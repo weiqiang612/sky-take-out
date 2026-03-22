@@ -1,8 +1,11 @@
 package com.sky.service.impl;
 
 import com.alibaba.fastjson.JSONObject;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
 import com.sky.context.BaseContext;
+import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.dto.OrdersPaymentDTO;
 import com.sky.dto.OrdersSubmitDTO;
 import com.sky.entity.*;
@@ -10,11 +13,14 @@ import com.sky.exception.AddressBookBusinessException;
 import com.sky.exception.OrderBusinessException;
 import com.sky.exception.ShoppingCartBusinessException;
 import com.sky.mapper.*;
+import com.sky.result.PageResult;
 import com.sky.service.OrdersService;
 import com.sky.utils.WeChatPayUtil;
 import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderSubmitVO;
+import com.sky.vo.OrderVO;
 import org.aspectj.weaver.ast.Or;
+import org.checkerframework.checker.nullness.compatqual.NonNullDecl;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -161,7 +167,7 @@ public class OrdersServiceImpl implements OrdersService {
         // 根据订单号查询订单
         Orders ordersDB = ordersMapper.getByNumber(outTradeNo);
 
-        if (Orders.PAID.equals(ordersDB.getPayStatus())){
+        if (Orders.PAID.equals(ordersDB.getPayStatus())) {
             throw new OrderBusinessException("订单已支付，请勿重复支付！");
         }
 
@@ -174,5 +180,53 @@ public class OrdersServiceImpl implements OrdersService {
                 .build();
 
         ordersMapper.update(orders);
+    }
+
+    /**
+     * 管理端分页查询
+     *
+     * @param ordersPageQueryDTO
+     * @return
+     */
+    @Override
+    public PageResult page(OrdersPageQueryDTO ordersPageQueryDTO) {
+        // 1. 开启分页查询
+        PageHelper.startPage(ordersPageQueryDTO.getPage(), ordersPageQueryDTO.getPageSize());
+        // 2. 先查订单基本信息
+        Page<Orders> ordersPage = ordersMapper.page(ordersPageQueryDTO);
+        // 3. 将orders封装为orderVO返回
+        ArrayList<OrderVO> orderVOS = getOrderVOS(ordersPage);
+        // 空集合直接返回
+        return new PageResult(ordersPage.getTotal(), orderVOS);
+    }
+
+    @NonNullDecl
+    private ArrayList<OrderVO> getOrderVOS(Page<Orders> ordersPage) {
+        ArrayList<OrderVO> orderVOS = new ArrayList<>();
+        List<Orders> orders = ordersPage.getResult();
+        if (orders != null && !orders.isEmpty()) {
+            orders.forEach(order -> {
+                OrderVO orderVO = new OrderVO();
+                BeanUtils.copyProperties(order, orderVO);
+                // 将orders菜品提取出菜品信息字符串
+                String orderDishes = getOrderStr(order);
+                orderVO.setOrderDishes(orderDishes);
+                orderVOS.add(orderVO);
+            });
+        }
+        return orderVOS;
+    }
+
+    private String getOrderStr(Orders order) {
+        List<OrderDetail> orderDetails = orderDetailMapper.getByOrderId(order.getId());
+        StringBuilder orderDishesStr = new StringBuilder();
+        orderDetails.forEach(orderDetail -> {
+            orderDishesStr.append(orderDetail.getName());
+            if (orderDetail.getDishFlavor() != null) {
+                orderDishesStr.append(orderDetail.getDishFlavor());
+            }
+            orderDishesStr.append("*" + orderDetail.getNumber() + ";");
+        });
+        return orderDishesStr.toString();
     }
 }
