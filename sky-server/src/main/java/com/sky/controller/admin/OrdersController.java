@@ -4,6 +4,7 @@ import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.OrdersService;
+import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,4 +52,15 @@ public class OrdersController {
         log.info("管理端查询订单详情,id:{}",id);
         return Result.success(ordersService.getById(id));
     }
+
+    /**
+     * 查询各个状态订单数量
+     * @return
+     */
+    @GetMapping("/statistics")
+    public Result<OrderStatisticsVO> statistics(){
+        log.info("管理端查询各个状态订单数量...");
+        return Result.success(ordersService.statistics());
+    }
+
 }

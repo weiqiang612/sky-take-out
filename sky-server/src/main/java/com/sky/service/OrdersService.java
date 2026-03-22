@@ -5,6 +5,7 @@ import com.sky.dto.OrdersPaymentDTO;
 import com.sky.dto.OrdersSubmitDTO;
 import com.sky.result.PageResult;
 import com.sky.vo.OrderPaymentVO;
+import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
 
@@ -52,4 +53,10 @@ public interface OrdersService {
      * @return
      */
     OrderVO getById(Integer id);
+
+    /**
+     * 查询各个状态订单数量
+     * @return
+     */
+    OrderStatisticsVO statistics();
 }

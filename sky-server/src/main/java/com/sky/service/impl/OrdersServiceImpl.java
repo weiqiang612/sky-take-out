@@ -17,6 +17,7 @@ import com.sky.result.PageResult;
 import com.sky.service.OrdersService;
 import com.sky.utils.WeChatPayUtil;
 import com.sky.vo.OrderPaymentVO;
+import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
 import org.aspectj.weaver.ast.Or;
@@ -202,6 +203,7 @@ public class OrdersServiceImpl implements OrdersService {
 
     /**
      * 根据订单ID查询订单
+     *
      * @param id
      * @return
      */
@@ -221,7 +223,30 @@ public class OrdersServiceImpl implements OrdersService {
     }
 
     /**
+     * 查询各个状态订单数量
+     *
+     * @return
+     */
+    @Override
+    public OrderStatisticsVO statistics() {
+        OrderStatisticsVO orderStatisticsVO = new OrderStatisticsVO();
+
+        // 待接单订单
+        Integer toBeConfirmed = ordersMapper.countByStatus(Orders.TO_BE_CONFIRMED);
+        orderStatisticsVO.setToBeConfirmed(toBeConfirmed == null ? 0 : toBeConfirmed);
+        // 待派送订单
+        Integer confirmed = ordersMapper.countByStatus(Orders.CONFIRMED);
+        orderStatisticsVO.setConfirmed(confirmed == null ? 0 : confirmed);
+        // 派送中订单
+        Integer deliveryInProgress = ordersMapper.countByStatus(Orders.DELIVERY_IN_PROGRESS);
+        orderStatisticsVO.setDeliveryInProgress(deliveryInProgress == null ? 0 : deliveryInProgress);
+
+        return orderStatisticsVO;
+    }
+
+    /**
      * 将分页查询结果封装成 OrderVO 集合返回
+     *
      * @param ordersPage
      * @return
      */
@@ -244,6 +269,7 @@ public class OrdersServiceImpl implements OrdersService {
 
     /**
      * 将订单的相关信息封装成字符串返回
+     *
      * @param order
      * @return
      */

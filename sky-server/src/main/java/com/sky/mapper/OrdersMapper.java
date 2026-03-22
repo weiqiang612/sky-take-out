@@ -49,4 +49,12 @@ public interface OrdersMapper {
      */
     @Select("select * from orders where id = #{id}")
     Orders getById(Integer id);
+
+    /**
+     * 统计各个状态订单数量
+     * @param status
+     * @return
+     */
+    @Select("select count(*) from orders where status = #{status}")
+    Integer countByStatus(Integer status);
 }
