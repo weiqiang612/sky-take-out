@@ -378,6 +378,27 @@ public class OrdersServiceImpl implements OrdersService {
     }
 
     /**
+     * 管理端完成订单
+     */
+    @Override
+    public void complete(Long id) {
+        Integer status = ordersMapper.getStatusById(id);
+        if (status == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+        // 1. 处理业务异常，只有派送中的订单才可以完成
+        if (!Orders.DELIVERY_IN_PROGRESS.equals(status)) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+        // 2. 派送订单
+        Orders orders = Orders.builder()
+                .id(id)
+                .status(Orders.COMPLETED)
+                .build();
+        ordersMapper.update(orders);
+    }
+
+    /**
      * 将分页查询结果封装成 OrderVO 集合返回
      *
      * @param ordersPage

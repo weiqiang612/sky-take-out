@@ -111,5 +111,16 @@ public class OrdersController {
         return Result.success();
     }
 
+    /**
+     * 完成订单
+     * @param id
+     * @return
+     */
+    @PutMapping("/complete/{id}")
+    public Result complete(@PathVariable Long id) {
+        log.info("管理端完成订单，订单id{}",id);
+        ordersService.complete(id);
+        return Result.success();
+    }
 
 }
