@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -186,7 +187,7 @@ public class OrdersServiceImpl implements OrdersService {
     }
 
     /**
-     * 管理端分页查询
+     * 分页查询
      *
      * @param ordersPageQueryDTO
      * @return
@@ -259,11 +260,11 @@ public class OrdersServiceImpl implements OrdersService {
         if (status == null) {
             throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
         }
-        if (status != Orders.TO_BE_CONFIRMED) {
+        if (!Orders.TO_BE_CONFIRMED.equals(status)) {
             throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
         }
         Integer payStatus = ordersMapper.getPayStatus(id);
-        if (payStatus != Orders.PAID) {
+        if (!Orders.PAID.equals(payStatus)) {
             throw new OrderBusinessException(MessageConstant.ORDER_NOT_PAID);
         }
         // 2. 修改订单状态
@@ -281,36 +282,26 @@ public class OrdersServiceImpl implements OrdersService {
     @Transactional
     @Override
     public void reject(OrdersRejectionDTO ordersRejectionDTO) {
-        Long id = ordersRejectionDTO.getId();
+        Orders orders = ordersMapper.getById(ordersRejectionDTO.getId());
         // 1. 先查询订单状态，处理业务异常，只有待接单的订单才可以拒单
-        Integer status = ordersMapper.getStatusById(id);
-        if (status == null) {
+        if (orders == null) {
             throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
         }
-        if (status != Orders.TO_BE_CONFIRMED) {
+        Integer status = orders.getStatus();
+
+        if (!Orders.TO_BE_CONFIRMED.equals(status)) {
             throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
         }
-        // 2. 拒单
-        ordersMapper.update(Orders.builder()
-                .id(id)
+        // 2. 拒单和退款逻辑
+        executeRejectORCancel(Orders.builder()
+                .id(orders.getId())
                 .status(Orders.CANCELLED)
                 .rejectionReason(ordersRejectionDTO.getRejectionReason())
                 .cancelTime(LocalDateTime.now())
+                .number(orders.getNumber())
+                .amount(orders.getAmount())
                 .build());
 
-        // 3. 检查订单支付状态，如果已支付需要退款，并将订单payStatus修改为退款
-        Integer payStatus = ordersMapper.getPayStatus(id);
-        if (Orders.PAID.equals(payStatus)) {
-            Orders order = ordersMapper.getById(id);
-            // 退款，测试环境不退款
-//            // 商户退款单号，测试环境不使用
-//            String outRefundNo = "";
-//            weChatPayUtil.refund(order.getNumber(),outRefundNo,order.getAmount(),order.getAmount());
-            log.info("订单 {} 触发拒单退款逻辑，金额：{}", order.getNumber(), order.getAmount());
-            // 修改订单支付状态为已退款
-            order.setPayStatus(Orders.REFUND);
-            ordersMapper.update(order);
-        }
     }
 
     /**
@@ -320,39 +311,49 @@ public class OrdersServiceImpl implements OrdersService {
      */
     @Transactional
     @Override
-    public void cancel(OrdersCancelDTO ordersCancelDTO) {
-        Long id = ordersCancelDTO.getId();
+    public void cancel(OrdersCancelDTO ordersCancelDTO, List<Integer> allowedStatuses) {
+        Orders orders = ordersMapper.getById(ordersCancelDTO.getId());
         // 1. 先查询订单状态，处理业务异常，只有3已接单 4派送中的订单才可以取消
-        Integer status = ordersMapper.getStatusById(id);
-        if (status == null) {
+        if (orders == null) {
             throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
         }
-        // 只有已接单和派送中的订单可以取消
-        if (!Orders.CONFIRMED.equals(status) && !Orders.DELIVERY_IN_PROGRESS.equals(status)) {
+        // 处理当前订单状态不符合要求的情况
+        if (!allowedStatuses.contains(orders.getStatus())) {
             throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
         }
-        // 2.取消订单
-        ordersMapper.update(Orders.builder()
-                .id(id)
+
+        // 2.执行取消订单逻辑，包含退款
+        executeRejectORCancel(Orders.builder()
+                .id(orders.getId())
                 .status(Orders.CANCELLED)
                 .cancelReason(ordersCancelDTO.getCancelReason())
                 .cancelTime(LocalDateTime.now())
+                .number(orders.getNumber())
+                .amount(orders.getAmount())
                 .build());
+    }
 
-        // 3. 检查订单支付状态，如果已支付需要退款，并将订单payStatus修改为退款
+    /**
+     * 处理订单取消和拒单逻辑，整合更新订单状态和处理退款逻辑，需要调用方将订单的number属性、amount属性给出
+     *
+     * @param orders
+     */
+    private void executeRejectORCancel(Orders orders) {
+        Long id = orders.getId();
+        // 1. 检查订单支付状态，如果已支付需要退款，并将订单payStatus修改为退款
         Integer payStatus = ordersMapper.getPayStatus(id);
         if (Orders.PAID.equals(payStatus)) {
-            Orders order = ordersMapper.getById(id);
             // 退款，测试环境不退款
 //            // 商户退款单号，测试环境不使用
 //            String outRefundNo = "";
 //            weChatPayUtil.refund(order.getNumber(),outRefundNo,order.getAmount(),order.getAmount());
-            log.info("订单 {} 触发取消订单退款逻辑，金额：{}", order.getNumber(), order.getAmount());
+            log.info("订单 {} 触发订单退款逻辑，金额：{}", orders.getNumber(), orders.getAmount());
             // 修改订单支付状态为已退款
-            order.setPayStatus(Orders.REFUND);
-            ordersMapper.update(order);
+            orders.setPayStatus(Orders.REFUND);
         }
+        ordersMapper.update(orders);
     }
+
 
     /**
      * 派送订单
@@ -399,6 +400,31 @@ public class OrdersServiceImpl implements OrdersService {
     }
 
     /**
+     * 用户端取消订单
+     *
+     * @param id
+     */
+    @Override
+    public void userCancel(Long id) {
+        OrdersCancelDTO ordersCancelDTO = new OrdersCancelDTO();
+        ordersCancelDTO.setId(id);
+        ordersCancelDTO.setCancelReason("用户取消订单");
+        // 用户端允许状态：1待付款 2待接单
+        cancel(ordersCancelDTO, Arrays.asList(Orders.PENDING_PAYMENT, Orders.TO_BE_CONFIRMED));
+    }
+
+    /**
+     * 管理端取消订单
+     *
+     * @param ordersCancelDTO
+     */
+    @Override
+    public void adminCancel(OrdersCancelDTO ordersCancelDTO) {
+        // 管理端允许状态：3已接单 4派送中 ，只有这些状态才可以执行取消订单操作
+        cancel(ordersCancelDTO, Arrays.asList(Orders.DELIVERY_IN_PROGRESS, Orders.CONFIRMED));
+    }
+
+    /**
      * 将分页查询结果封装成 OrderVO 集合返回
      *
      * @param ordersPage
@@ -415,6 +441,9 @@ public class OrdersServiceImpl implements OrdersService {
                 // 将orders菜品提取出菜品信息字符串
                 String orderDishes = getOrderDishesStr(order);
                 orderVO.setOrderDishes(orderDishes);
+                // 封装orderDetailList属性
+                List<OrderDetail> orderDetails = orderDetailMapper.getByOrderId(order.getId());
+                orderVO.setOrderDetailList(orderDetails);
                 orderVOS.add(orderVO);
             });
         }

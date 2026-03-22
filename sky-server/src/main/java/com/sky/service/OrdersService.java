@@ -7,6 +7,8 @@ import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
 
+import java.util.List;
+
 /**
  * @author weiqiang
  * @version 1.0
@@ -39,7 +41,7 @@ public interface OrdersService {
     void paySuccess(String outTradeNo);
 
     /**
-     * 管理端分页查询
+     * 分页查询
      * @param ordersPageQueryDTO
      * @return
      */
@@ -74,7 +76,7 @@ public interface OrdersService {
      * 取消订单
      * @param ordersCancelDTO
      */
-    void cancel(OrdersCancelDTO ordersCancelDTO);
+    void cancel(OrdersCancelDTO ordersCancelDTO, List<Integer> allowedStatuses);
 
     /**
      * 派送订单
@@ -86,4 +88,16 @@ public interface OrdersService {
      * 完成订单
      */
     void complete(Long id);
+
+    /**
+     * 用户端取消订单
+     * @param id
+     */
+    void userCancel(Long id);
+
+    /**
+     * 管理端取消订单
+     * @param ordersCancelDTO
+     */
+    void adminCancel(OrdersCancelDTO ordersCancelDTO);
 }

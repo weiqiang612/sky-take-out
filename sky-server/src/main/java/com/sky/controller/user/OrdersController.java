@@ -1,13 +1,16 @@
 package com.sky.controller.user;
 
 import com.sky.context.BaseContext;
-import com.sky.dto.OrdersDTO;
+import com.sky.dto.OrdersCancelDTO;
+import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.dto.OrdersPaymentDTO;
 import com.sky.dto.OrdersSubmitDTO;
+import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.OrdersService;
 import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderSubmitVO;
+import com.sky.vo.OrderVO;
 import io.swagger.annotations.ApiOperation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +68,55 @@ public class OrdersController {
 
         log.info("生成预支付交易单：{}", vo);
         return Result.success(vo);
+    }
+
+    /**
+     * 用户端查询历史订单
+     *
+     * @param ordersPageQueryDTO
+     * @return
+     */
+    @GetMapping("/historyOrders")
+    public Result<PageResult> pageHistoryOrders(OrdersPageQueryDTO ordersPageQueryDTO) {
+        log.info("用户端查询历史订单,{}", ordersPageQueryDTO);
+        PageResult result = ordersService.page(ordersPageQueryDTO);
+        return Result.success(result);
+    }
+
+    /**
+     * 用户端查询订单详情
+     * @param id
+     * @return
+     */
+    @GetMapping("/orderDetail/{id}")
+    public Result<OrderVO> orderDetail(@PathVariable Long id) {
+        log.info("用户端查询订单详情，订单id：{}",id);
+        OrderVO result = ordersService.getById(id);
+        return Result.success(result);
+    }
+
+    /**
+     * 用户催单功能
+     * @param id
+     * @return
+     */
+    @GetMapping("reminder/{id}")
+    public Result reminder(@PathVariable Long id) {
+        log.info("用户催单，{}",id);
+        // TODO使用webSocket向管理端发送提醒
+        return Result.success();
+    }
+
+    /**
+     * 用户端取消订单
+     * @param id
+     * @return
+     */
+    @PutMapping("/cancel/{id}")
+    public Result cancel(@PathVariable Long id) {
+        log.info("用户端取消订单，订单id{}",id);
+        ordersService.userCancel(id);
+        return Result.success();
     }
 
 }
