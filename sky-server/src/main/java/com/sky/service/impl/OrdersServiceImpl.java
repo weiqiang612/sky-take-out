@@ -5,9 +5,7 @@ import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
 import com.sky.context.BaseContext;
-import com.sky.dto.OrdersPageQueryDTO;
-import com.sky.dto.OrdersPaymentDTO;
-import com.sky.dto.OrdersSubmitDTO;
+import com.sky.dto.*;
 import com.sky.entity.*;
 import com.sky.exception.AddressBookBusinessException;
 import com.sky.exception.OrderBusinessException;
@@ -20,6 +18,7 @@ import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
+import lombok.extern.slf4j.Slf4j;
 import org.aspectj.weaver.ast.Or;
 import org.checkerframework.checker.nullness.compatqual.NonNullDecl;
 import org.springframework.beans.BeanUtils;
@@ -39,6 +38,7 @@ import java.util.List;
  */
 
 @Service
+@Slf4j
 public class OrdersServiceImpl implements OrdersService {
 
     @Autowired
@@ -208,7 +208,7 @@ public class OrdersServiceImpl implements OrdersService {
      * @return
      */
     @Override
-    public OrderVO getById(Integer id) {
+    public OrderVO getById(Long id) {
         if (id == null) {
             throw new OrderBusinessException("查询订单id不能为NULL！");
         }
@@ -242,6 +242,73 @@ public class OrdersServiceImpl implements OrdersService {
         orderStatisticsVO.setDeliveryInProgress(deliveryInProgress == null ? 0 : deliveryInProgress);
 
         return orderStatisticsVO;
+    }
+
+    /**
+     * 接单
+     *
+     * @param ordersConfirmDTO
+     */
+    @Override
+    public void confirm(OrdersConfirmDTO ordersConfirmDTO) {
+        Long id = ordersConfirmDTO.getId();
+        // 1. 先查询订单状态，处理业务异常，只有待接单并且已付款的订单才可以接单
+        Integer status = ordersMapper.getStatusById(id);
+        if (status == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+        if (status != Orders.TO_BE_CONFIRMED) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+        Integer payStatus = ordersMapper.getPayStatus(id);
+        if (payStatus != Orders.PAID) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_PAID);
+        }
+        // 2. 修改订单状态
+        ordersMapper.update(Orders.builder()
+                .id(id)
+                .status(Orders.CONFIRMED)
+                .build());
+    }
+
+    /**
+     * 拒单
+     *
+     * @param ordersRejectionDTO
+     */
+    @Transactional
+    @Override
+    public void reject(OrdersRejectionDTO ordersRejectionDTO) {
+        Long id = ordersRejectionDTO.getId();
+        // 1. 先查询订单状态，处理业务异常，只有待接单的订单才可以拒单
+        Integer status = ordersMapper.getStatusById(id);
+        if (status == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+        if (status != Orders.TO_BE_CONFIRMED) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+        // 2. 拒单
+        ordersMapper.update(Orders.builder()
+                .id(id)
+                .status(Orders.CANCELLED)
+                .rejectionReason(ordersRejectionDTO.getRejectionReason())
+                .cancelTime(LocalDateTime.now())
+                .build());
+
+        // 3. 检查订单支付状态，如果已支付需要退款，并将订单payStatus修改为退款
+        Integer payStatus = ordersMapper.getPayStatus(id);
+        if (payStatus == Orders.PAID) {
+            Orders order = ordersMapper.getById(id);
+            // 退款，测试环境不退款
+//            // 商户退款单号，测试环境不使用
+//            String outRefundNo = "";
+//            weChatPayUtil.refund(order.getNumber(),outRefundNo,order.getAmount(),order.getAmount());
+            log.info("订单 {} 触发拒单退款逻辑，金额：{}", order.getNumber(), order.getAmount());
+            // 修改订单支付状态为已退款
+            order.setPayStatus(Orders.REFUND);
+            ordersMapper.update(order);
+        }
     }
 
     /**

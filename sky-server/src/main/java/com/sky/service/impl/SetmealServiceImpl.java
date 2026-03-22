@@ -167,6 +167,7 @@ public class SetmealServiceImpl implements SetmealService {
     @CacheEvict(cacheNames = "setmealCache", allEntries = true)
     @Override
     public void updateStatus(Integer status, Long id) {
+        // TODO处理套餐菜品为空不能起售情况
         Setmeal setmeal = Setmeal.builder()
                 .status(status)
                 .id(id)
