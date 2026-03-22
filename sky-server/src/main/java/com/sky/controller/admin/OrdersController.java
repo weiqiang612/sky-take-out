@@ -99,5 +99,17 @@ public class OrdersController {
         return Result.success();
     }
 
+    /**
+     * 派送订单
+     * @param id
+     * @return
+     */
+    @PutMapping("/delivery/{id}")
+    public Result delivery(@PathVariable Long id) {
+        log.info("管理端派送订单，id：{}",id);
+        ordersService.delivery(id);
+        return Result.success();
+    }
+
 
 }
