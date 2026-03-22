@@ -200,6 +200,31 @@ public class OrdersServiceImpl implements OrdersService {
         return new PageResult(ordersPage.getTotal(), orderVOS);
     }
 
+    /**
+     * 根据订单ID查询订单
+     * @param id
+     * @return
+     */
+    @Override
+    public OrderVO getById(Integer id) {
+        if (id == null) {
+            throw new OrderBusinessException("查询订单id不能为NULL！");
+        }
+        Orders order = ordersMapper.getById(id);
+        OrderVO orderVO = new OrderVO();
+        BeanUtils.copyProperties(order, orderVO);
+        // 1. 封装菜品信息字符串
+        orderVO.setOrderDishes(getOrderDishesStr(order));
+        // 2. 封装菜品orderDetailList
+        orderVO.setOrderDetailList(orderDetailMapper.getByOrderId(order.getId()));
+        return orderVO;
+    }
+
+    /**
+     * 将分页查询结果封装成 OrderVO 集合返回
+     * @param ordersPage
+     * @return
+     */
     @NonNullDecl
     private ArrayList<OrderVO> getOrderVOS(Page<Orders> ordersPage) {
         ArrayList<OrderVO> orderVOS = new ArrayList<>();
@@ -209,7 +234,7 @@ public class OrdersServiceImpl implements OrdersService {
                 OrderVO orderVO = new OrderVO();
                 BeanUtils.copyProperties(order, orderVO);
                 // 将orders菜品提取出菜品信息字符串
-                String orderDishes = getOrderStr(order);
+                String orderDishes = getOrderDishesStr(order);
                 orderVO.setOrderDishes(orderDishes);
                 orderVOS.add(orderVO);
             });
@@ -217,7 +242,12 @@ public class OrdersServiceImpl implements OrdersService {
         return orderVOS;
     }
 
-    private String getOrderStr(Orders order) {
+    /**
+     * 将订单的相关信息封装成字符串返回
+     * @param order
+     * @return
+     */
+    private String getOrderDishesStr(Orders order) {
         List<OrderDetail> orderDetails = orderDetailMapper.getByOrderId(order.getId());
         StringBuilder orderDishesStr = new StringBuilder();
         orderDetails.forEach(orderDetail -> {
