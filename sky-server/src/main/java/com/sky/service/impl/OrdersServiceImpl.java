@@ -31,6 +31,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author weiqiang
@@ -309,7 +310,6 @@ public class OrdersServiceImpl implements OrdersService {
      *
      * @param ordersCancelDTO
      */
-    @Transactional
     @Override
     public void cancel(OrdersCancelDTO ordersCancelDTO, List<Integer> allowedStatuses) {
         Orders orders = ordersMapper.getById(ordersCancelDTO.getId());
@@ -395,6 +395,7 @@ public class OrdersServiceImpl implements OrdersService {
         Orders orders = Orders.builder()
                 .id(id)
                 .status(Orders.COMPLETED)
+                .deliveryTime(LocalDateTime.now())
                 .build();
         ordersMapper.update(orders);
     }
@@ -404,11 +405,15 @@ public class OrdersServiceImpl implements OrdersService {
      *
      * @param id
      */
+    @Transactional
     @Override
     public void userCancel(Long id) {
         OrdersCancelDTO ordersCancelDTO = new OrdersCancelDTO();
         ordersCancelDTO.setId(id);
         ordersCancelDTO.setCancelReason("用户取消订单");
+        if (Orders.DELIVERY_IN_PROGRESS.equals(ordersMapper.getStatusById(id))) {
+            throw new OrderBusinessException("订单正在派送中，请联系商家进行退款！");
+        }
         // 用户端允许状态：1待付款 2待接单
         cancel(ordersCancelDTO, Arrays.asList(Orders.PENDING_PAYMENT, Orders.TO_BE_CONFIRMED));
     }
@@ -418,10 +423,65 @@ public class OrdersServiceImpl implements OrdersService {
      *
      * @param ordersCancelDTO
      */
+    @Transactional
     @Override
     public void adminCancel(OrdersCancelDTO ordersCancelDTO) {
         // 管理端允许状态：3已接单 4派送中 ，只有这些状态才可以执行取消订单操作
         cancel(ordersCancelDTO, Arrays.asList(Orders.DELIVERY_IN_PROGRESS, Orders.CONFIRMED));
+    }
+
+    /**
+     * 再来一单
+     *
+     * @param id
+     */
+    @Transactional
+    @Override
+    public void repetition(Long id) {
+//        // 再来一单直接复用数据即可，但是要注意同步插入订单明细表
+//        Orders order = ordersMapper.getById(id);
+//        if (order == null) {
+//            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+//        }
+//        order.setId(null);
+//        order.setNumber(String.valueOf(System.currentTimeMillis()));
+//        order.setStatus(Orders.PENDING_PAYMENT);
+//        order.setOrderTime(LocalDateTime.now());
+//        order.setCheckoutTime(null);
+//        order.setPayStatus(Orders.UN_PAID);
+//        order.setCancelReason(null);
+//        order.setCancelTime(null);
+//        order.setRejectionReason(null);
+//        order.setEstimatedDeliveryTime(LocalDateTime.now().plusHours(1));
+//        order.setDeliveryTime(null);
+//        // 需要主键回填，便于添加订单明细表
+//        ordersMapper.insert(order);
+//
+//        // 2. 向订单明细表插入n条数据
+//        List<OrderDetail> orderDetails = orderDetailMapper.getByOrderId(id);
+//        List<OrderDetail> newOrderDetails = orderDetails.stream().map(orderDetail -> {
+//                    orderDetail.setId(null);
+//                    orderDetail.setOrderId(order.getId());
+//                    return orderDetail;
+//                }
+//        ).collect(Collectors.toList());
+//        orderDetailMapper.insertBatch(newOrderDetails);
+
+        // 再来一单另一种理解，将菜品重新加入购物车
+        List<OrderDetail> details = orderDetailMapper.getByOrderId(id);
+        if (details != null && !details.isEmpty()) {
+            // 1. 清空用户原有购物车
+            shoppingCartMapper.remove(ShoppingCart.builder().userId(BaseContext.getCurrentId()).build());
+            // 2. 将 OrderDetail 转换为 ShoppingCart
+            List<ShoppingCart> shoppingCarts = details.stream().map(detail -> {
+                ShoppingCart sc = new ShoppingCart();
+                BeanUtils.copyProperties(detail, sc); // 拷贝 name, image, dishId, setmealId, dishFlavor, number, amount
+                sc.setUserId(BaseContext.getCurrentId());
+                sc.setCreateTime(LocalDateTime.now());
+                return sc;
+            }).collect(Collectors.toList());
+            shoppingCartMapper.saveBatch(shoppingCarts);
+        }
     }
 
     /**
@@ -464,7 +524,7 @@ public class OrdersServiceImpl implements OrdersService {
             if (orderDetail.getDishFlavor() != null) {
                 orderDishesStr.append(orderDetail.getDishFlavor());
             }
-            orderDishesStr.append("*" + orderDetail.getNumber() + ";");
+            orderDishesStr.append("*").append(orderDetail.getNumber()).append(";");
         });
         return orderDishesStr.toString();
     }

@@ -44,4 +44,10 @@ public interface ShoppingCartMapper {
      * @param shoppingCart
      */
     void remove(ShoppingCart shoppingCart);
+
+    /**
+     * 批量添加购物车
+     * @param shoppingCarts
+     */
+    void saveBatch(List<ShoppingCart> shoppingCarts);
 }

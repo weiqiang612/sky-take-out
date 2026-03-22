@@ -5,6 +5,12 @@
         insert into shopping_cart(name, image, user_id, dish_id, setmeal_id, dish_flavor, number, amount, create_time) VALUES
         (#{name},#{image},#{userId},#{dishId},#{setmealId},#{dishFlavor},#{number},#{amount},#{createTime})
     </insert>
+    <insert id="saveBatch">
+        insert into shopping_cart(name, image, user_id, dish_id, setmeal_id, dish_flavor, number, amount, create_time) VALUES
+        <foreach collection="shoppingCarts" item="sc" separator=",">
+            (#{sc.name},#{sc.image},#{sc.userId},#{sc.dishId},#{sc.setmealId},#{sc.dishFlavor},#{sc.number},#{sc.amount},#{sc.createTime})
+        </foreach>
+    </insert>
     <delete id="remove">
         delete from shopping_cart
         <where>
