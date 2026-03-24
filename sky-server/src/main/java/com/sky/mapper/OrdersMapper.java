@@ -6,6 +6,8 @@ import com.sky.entity.Orders;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.List;
+
 /**
  * @author weiqiang
  * @version 1.0
@@ -73,4 +75,18 @@ public interface OrdersMapper {
      */
     @Select("select pay_status from orders where id = #{id}")
     Integer getPayStatus(Long id);
+
+    /**
+     * 查询未支付的超时订单
+     * @return
+     */
+    List<Long> getTimeoutOrder();
+
+    /**
+     * 查询商家没有点击已完成的，但实际上派送完的订单
+     * @return
+     */
+    List<Long> getINProcessOrder();
+
+    void updateBatch(List<Long> orderIds, long targetStatus, String reason);
 }

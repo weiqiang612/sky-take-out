@@ -123,8 +123,8 @@ public class OrdersServiceImpl implements OrdersService {
         JSONArray jsonArray = (JSONArray) result.get("routes");
         Integer distance = (Integer) ((JSONObject) jsonArray.get(0)).get("distance");
 
-        if(distance > 5000){
-            //配送距离超过5000米
+        if(distance > 50000){
+            //配送距离超过50000米
             throw new OrderBusinessException("超出配送范围");
         }
     }
@@ -151,8 +151,7 @@ public class OrdersServiceImpl implements OrdersService {
         }
 
         // 检查用户的收货地址是否超出配送范围
-        // TODO 填写好百度地图开放平台发放的ak后，再解开注释
-//        checkOutOfRange(addressBook.getCityName() + addressBook.getDistrictName() + addressBook.getDetail());
+        checkOutOfRange(addressBook.getCityName() + addressBook.getDistrictName() + addressBook.getDetail());
 
         // 检查购物车
         List<ShoppingCart> shoppingCarts = shoppingCartMapper.list(ShoppingCart.builder().userId(userId).build());

@@ -62,8 +62,7 @@ sky:
     secret: ${sky.wechat.secret}
 
   shop:
-    address: 北京市海淀区上地十街10号
+    address: 河北省邢台市宁晋县
 
   baidu:
-    # TODO这里填充之后获取的ak
-    ak: abcd
+    ak: tucDL9qtDbA0nNANp85f1ykuObbbpaOA
