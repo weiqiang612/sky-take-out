@@ -3,10 +3,13 @@ package com.sky.mapper;
 import com.github.pagehelper.Page;
 import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.entity.Orders;
+import org.apache.ibatis.annotations.MapKey;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author weiqiang
@@ -89,4 +92,13 @@ public interface OrdersMapper {
     List<Long> getINProcessOrder();
 
     void updateBatch(List<Long> orderIds, long targetStatus, String reason);
+
+    /**
+     * 营业额统计
+     * @param begin
+     * @param end
+     * @return
+     */
+    @MapKey("orderDate")
+    Map<String, Map<String, Object>> turnoverStatistics(LocalDate begin, LocalDate end);
 }

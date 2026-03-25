@@ -81,4 +81,11 @@
         from orders
         where status = 4 and estimated_delivery_time &lt;= DATE_SUB(now(),INTERVAL 1 HOUR)
     </select>
+    <select id="turnoverStatistics" resultType="java.util.Map">
+        select DATE_FORMAT(checkout_time, '%Y-%m-%d') orderDate, SUM(amount) amount
+        from orders
+        where status = 5
+          and checkout_time between #{begin} and #{end}
+        group by orderDate
+    </select>
 </mapper>
