@@ -21,6 +21,7 @@ import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
+import com.sky.websocket.WebSocketServer;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.weaver.ast.Or;
 import org.checkerframework.checker.nullness.compatqual.NonNullDecl;
@@ -57,6 +58,9 @@ public class OrdersServiceImpl implements OrdersService {
     private UserMapper userMapper;
     @Autowired
     private WeChatPayUtil weChatPayUtil;
+
+    @Autowired
+    private WebSocketServer webSocketServer;
 
 
     @Value("${sky.shop.address}")
@@ -238,7 +242,7 @@ public class OrdersServiceImpl implements OrdersService {
     }
 
     /**
-     * 支付成功，修改订单状态
+     * 支付成功，修改订单状态，来单提醒
      *
      * @param outTradeNo
      */
@@ -258,6 +262,16 @@ public class OrdersServiceImpl implements OrdersService {
                 .payStatus(Orders.PAID)
                 .checkoutTime(LocalDateTime.now())
                 .build();
+
+        // 来单提醒
+        // 1. 根据约定构造消息内容
+        JSONObject jsonObject = new JSONObject();
+        jsonObject.put("type", 1);
+        jsonObject.put("orderId", ordersDB.getId());
+        jsonObject.put("content", "订单号：" + outTradeNo);
+
+        // 2. 发送消息
+        webSocketServer.sendToAllClient(jsonObject.toString());
 
         ordersMapper.update(orders);
     }
