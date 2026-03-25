@@ -9,4 +9,13 @@
             #{od.number},#{od.amount})
         </foreach>
     </insert>
+    <select id="top" resultType="java.util.LinkedHashMap">
+        SELECT od.`name`, SUM(od.number) number
+        from order_detail od
+        JOIN orders o ON od.order_id = o.id
+        WHERE o.status = 5
+        AND o.checkout_time BETWEEN #{begin} AND #{end}
+        GROUP BY od.`name`
+        ORDER BY number desc
+    </select>
 </mapper>

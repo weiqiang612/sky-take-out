@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -101,4 +102,21 @@ public interface OrdersMapper {
      */
     @MapKey("orderDate")
     Map<String, Map<String, Object>> turnoverStatistics(LocalDate begin, LocalDate end);
+
+    /**
+     * 条件查询订单数量
+     * @param begin
+     * @param end
+     * @param status
+     * @return
+     */
+    Integer countByTime(LocalDateTime begin, LocalDateTime end, Integer status);
+
+    /**
+     * 查询指定时间内的订单id
+     * @param begin
+     * @param end
+     * @return
+     */
+    List<Integer> getByTime(LocalDate begin, LocalDate end);
 }
