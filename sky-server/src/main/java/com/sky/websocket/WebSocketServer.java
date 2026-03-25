@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class WebSocketServer {
 
     // 用来存储会话
-    private static Map<String, Session> sessionMap = new ConcurrentHashMap<>();
+    private static final Map<String, Session> SESSION_POOL = new ConcurrentHashMap<>();
 
     /**
      * 连接建立时调用
@@ -35,8 +35,8 @@ public class WebSocketServer {
      */
     @OnOpen
     public void onOpen(Session session, @PathParam("clientId") String clientId) {
-        log.info("客户端建立连接成功：{}", clientId);
-        sessionMap.put(clientId, session);
+        SESSION_POOL.put(clientId, session);
+        log.info("客户端建立连接成功：{},当前在线人数：{}", clientId, SESSION_POOL.size());
     }
 
     /**
@@ -47,7 +47,7 @@ public class WebSocketServer {
     @OnClose
     public void onClose(@PathParam("clientId") String clientId) {
         log.info("客户端断开连接：{}", clientId);
-        sessionMap.remove(clientId);
+        SESSION_POOL.remove(clientId);
     }
 
     /**
@@ -65,7 +65,7 @@ public class WebSocketServer {
      * 服务器向指定客户端推送消息
      */
     public void sendToClient(String clientId, String message) {
-        Session session = sessionMap.get(clientId);
+        Session session = SESSION_POOL.get(clientId);
         if (session != null) {
             try {
                 session.getBasicRemote().sendText(message);
@@ -81,8 +81,8 @@ public class WebSocketServer {
      * @param message
      */
     public void sendToAllClient(String message) {
-        if (sessionMap.isEmpty()) return;
-        Collection<Session> sessions = sessionMap.values();
+        if (SESSION_POOL.isEmpty()) return;
+        Collection<Session> sessions = SESSION_POOL.values();
         // 服务端向客户端发送消息
         for (Session session : sessions) {
             try {

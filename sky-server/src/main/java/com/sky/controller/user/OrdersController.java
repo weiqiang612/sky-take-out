@@ -32,6 +32,7 @@ public class OrdersController {
     @Autowired
     private OrdersService ordersService;
 
+
     /**
      * 用户下单功能
      *
@@ -103,7 +104,7 @@ public class OrdersController {
     @GetMapping("reminder/{id}")
     public Result reminder(@PathVariable Long id) {
         log.info("用户催单，{}",id);
-        // TODO使用webSocket向管理端发送提醒
+        ordersService.reminder(id);
         return Result.success();
     }
 

@@ -575,6 +575,23 @@ public class OrdersServiceImpl implements OrdersService {
     }
 
     /**
+     * 客户催单
+     * @param id
+     */
+    @Override
+    public void reminder(Long id) {
+        Orders order = ordersMapper.getById(id);
+        if (order == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+            JSONObject jsonObject = new JSONObject();
+            jsonObject.put("type", 2);
+            jsonObject.put("orderId", id);
+            jsonObject.put("content", "订单号：" + order.getNumber());
+            webSocketServer.sendToAllClient(jsonObject.toJSONString());
+    }
+
+    /**
      * 将分页查询结果封装成 OrderVO 集合返回
      *
      * @param ordersPage
