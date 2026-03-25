@@ -1,8 +1,10 @@
 package com.sky.service.impl;
 
 import com.sky.mapper.OrdersMapper;
+import com.sky.mapper.UserMapper;
 import com.sky.service.ReportService;
 import com.sky.vo.TurnoverReportVO;
+import com.sky.vo.UserReportVO;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,8 @@ public class ReportServiceImpl implements ReportService {
 
     @Autowired
     private OrdersMapper ordersMapper;
+    @Autowired
+    private UserMapper userMapper;
 
     /**
      * 营业额统计
@@ -62,6 +66,45 @@ public class ReportServiceImpl implements ReportService {
         return TurnoverReportVO.builder()
                 .dateList(StringUtils.join(dateList, ","))
                 .turnoverList(StringUtils.join(turnoverList, ","))
+                .build();
+    }
+
+    /**
+     * 用户统计
+     * @param begin
+     * @param end
+     * @return
+     */
+    @Override
+    public UserReportVO userStatistics(LocalDate begin, LocalDate end) {
+        ArrayList<LocalDate> localDateList = new ArrayList<>();
+        ArrayList<Integer> totalUserList = new ArrayList<>();
+        ArrayList<Integer> newUserList = new ArrayList<>();
+
+        // 1. 获得从开始到结束的所有日期
+        LocalDate tempBegin = begin;
+        while (!tempBegin.isAfter(end)) {
+            localDateList.add(tempBegin);
+            tempBegin = tempBegin.plusDays(1);
+        }
+        // 2. 遍历每天，得到当天的用户总量和新增用户量
+        for (LocalDate date : localDateList) {
+            // date这天0:00
+            LocalDateTime dateLeft = LocalDateTime.of(date, LocalTime.MIN);
+            // date这天23:59
+            LocalDateTime dateRight = LocalDateTime.of(date, LocalTime.MAX);
+
+            // 当天的用户总量
+            Integer sum = userMapper.countUser(null,dateRight);
+            totalUserList.add(sum);
+            // 当天新增用户总量
+            Integer newNum = userMapper.countUser(dateLeft,dateRight);
+            newUserList.add(newNum);
+        }
+        return UserReportVO.builder()
+                .dateList(StringUtils.join(localDateList,","))
+                .totalUserList(StringUtils.join(totalUserList,","))
+                .newUserList(StringUtils.join(newUserList,","))
                 .build();
     }
 }

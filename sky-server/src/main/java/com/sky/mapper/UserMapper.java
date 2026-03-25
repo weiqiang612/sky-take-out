@@ -6,6 +6,9 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
 /**
  * @author weiqiang
  * @version 1.0
@@ -36,4 +39,12 @@ public interface UserMapper {
      */
     @Select("select * from user where id = #{userId}")
     User getById(Long userId);
+
+    /**
+     * 条件查询某一时间段的用户总量
+     * @param begin
+     * @param end
+     * @return
+     */
+    Integer countUser(LocalDateTime begin, LocalDateTime end);
 }
