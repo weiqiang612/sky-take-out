@@ -80,4 +80,11 @@ public interface DishMapper {
      * @return
      */
     List<Dish> listByCategoryId(Long categoryId);
+
+    /**
+     * 查询不同状态菜品数量
+     * @param status
+     * @return
+     */
+    Integer countByStatus(Integer status);
 }

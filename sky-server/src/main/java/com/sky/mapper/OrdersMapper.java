@@ -5,10 +5,12 @@ import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.entity.Orders;
 import org.apache.ibatis.annotations.MapKey;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -110,7 +112,7 @@ public interface OrdersMapper {
      * @param status
      * @return
      */
-    Integer countByTime(LocalDateTime begin, LocalDateTime end, Integer status);
+    Integer countByTime(@Param("begin") LocalDateTime begin,@Param("end") LocalDateTime end,@Param("status") Integer status);
 
     /**
      * 查询指定时间内的订单id
@@ -119,4 +121,10 @@ public interface OrdersMapper {
      * @return
      */
     List<Integer> getByTime(LocalDate begin, LocalDate end);
+
+    /**
+     * 获取今日营业额
+     * @param map
+     */
+    Double turnoverStatisticsDaily(HashMap<String, Object> map);
 }

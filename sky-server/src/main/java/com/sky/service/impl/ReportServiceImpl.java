@@ -191,7 +191,9 @@ public class ReportServiceImpl implements ReportService {
         ArrayList<Integer> numberList = new ArrayList<>();
 
         // 1. 对指定时间内的已完成的这些订单中的菜品排序
-        List<LinkedHashMap<String, Object>> map = orderDetailMapper.top(begin,end);
+        LocalDateTime beginLeft = LocalDateTime.of(begin, LocalTime.MIN);
+        LocalDateTime endRight = LocalDateTime.of(end, LocalTime.MAX);
+        List<LinkedHashMap<String, Object>> map = orderDetailMapper.top(beginLeft,endRight);
         for (LinkedHashMap<String, Object> linkedHashMap : map) {
             // 1. 获取名称
             nameList.add((String) linkedHashMap.get("name"));

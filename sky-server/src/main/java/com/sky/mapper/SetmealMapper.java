@@ -70,4 +70,10 @@ public interface SetmealMapper {
      * @param ids
      */
     void deleteBatch(List<Long> ids);
+
+    /**
+     * 根据状态查询套餐数量
+     * @return
+     */
+    Integer countByStatus(Integer status);
 }

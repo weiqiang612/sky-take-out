@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,5 +41,5 @@ public interface OrderDetailMapper {
      * @param end
      * @return
      */
-    List<LinkedHashMap<String, Object>> top(LocalDate begin, LocalDate end);
+    List<LinkedHashMap<String, Object>> top(LocalDateTime begin, LocalDateTime end);
 }
