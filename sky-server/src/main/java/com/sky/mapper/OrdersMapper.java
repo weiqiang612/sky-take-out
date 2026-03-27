@@ -123,7 +123,7 @@ public interface OrdersMapper {
     List<Integer> getByTime(LocalDate begin, LocalDate end);
 
     /**
-     * 获取今日营业额
+     * 获取营业额
      * @param map
      */
     Double turnoverStatisticsDaily(HashMap<String, Object> map);

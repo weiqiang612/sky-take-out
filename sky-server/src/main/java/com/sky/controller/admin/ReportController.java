@@ -7,13 +7,17 @@ import com.sky.vo.SalesTop10ReportVO;
 import com.sky.vo.TurnoverReportVO;
 import com.sky.vo.UserReportVO;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.HttpResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.resource.HttpResource;
 
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -84,6 +88,7 @@ public class ReportController {
 
     /**
      * 热销排名
+     *
      * @param begin
      * @param end
      * @return
@@ -92,9 +97,22 @@ public class ReportController {
     public Result<SalesTop10ReportVO> top10(
             @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate begin,
             @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate end
-    ){
+    ) {
         log.info("top10,begin:{},end:{}", begin, end);
-        return Result.success(reportService.top10(begin,end));
+        return Result.success(reportService.top10(begin, end));
+    }
+
+    /**
+     * 导出Excel报表，本质上是触发文件下载
+     */
+    @GetMapping("/export")
+    public void export(HttpServletResponse response) {
+        log.info("导出Excel报表...");
+        try {
+            reportService.export(response);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
 

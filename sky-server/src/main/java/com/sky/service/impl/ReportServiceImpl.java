@@ -1,24 +1,27 @@
 package com.sky.service.impl;
 
+import com.sky.entity.Orders;
 import com.sky.mapper.OrderDetailMapper;
 import com.sky.mapper.OrdersMapper;
 import com.sky.mapper.UserMapper;
 import com.sky.service.ReportService;
-import com.sky.vo.OrderReportVO;
-import com.sky.vo.SalesTop10ReportVO;
-import com.sky.vo.TurnoverReportVO;
-import com.sky.vo.UserReportVO;
+import com.sky.service.WorkspaceService;
+import com.sky.vo.*;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.ibatis.transaction.Transaction;
+import org.apache.poi.xssf.usermodel.XSSFRow;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -36,6 +39,8 @@ public class ReportServiceImpl implements ReportService {
     private UserMapper userMapper;
     @Autowired
     private OrderDetailMapper orderDetailMapper;
+    @Autowired
+    private WorkspaceService workspaceService;
 
     /**
      * 营业额统计
@@ -158,8 +163,8 @@ public class ReportServiceImpl implements ReportService {
             validOrderCountList.add(validOrderCountDaily);
         }
         // 3. 获取选定时间内的之前的订单总数
+        LocalDateTime beginLeft = LocalDateTime.of(begin, LocalTime.MIN);
         LocalDateTime endRight = LocalDateTime.of(end, LocalTime.MAX);
-        LocalDateTime beginLeft = LocalDateTime.of(end, LocalTime.MIN);
         totalOrderCount = ordersMapper.countByTime(beginLeft, endRight, null);
         // 4. 获取选定时间内的有效订单数
         validOrderCount = ordersMapper.countByTime(beginLeft, endRight, 5);
@@ -193,7 +198,7 @@ public class ReportServiceImpl implements ReportService {
         // 1. 对指定时间内的已完成的这些订单中的菜品排序
         LocalDateTime beginLeft = LocalDateTime.of(begin, LocalTime.MIN);
         LocalDateTime endRight = LocalDateTime.of(end, LocalTime.MAX);
-        List<LinkedHashMap<String, Object>> map = orderDetailMapper.top(beginLeft,endRight);
+        List<LinkedHashMap<String, Object>> map = orderDetailMapper.top(beginLeft, endRight);
         for (LinkedHashMap<String, Object> linkedHashMap : map) {
             // 1. 获取名称
             nameList.add((String) linkedHashMap.get("name"));
@@ -210,5 +215,84 @@ public class ReportServiceImpl implements ReportService {
                 .nameList(StringUtils.join(nameList, ","))
                 .numberList(StringUtils.join(numberList, ","))
                 .build();
+    }
+
+    /**
+     * 导出Excel报表
+     */
+    @Override
+    public void export(HttpServletResponse response) throws IOException {
+        InputStream inputStream = this.getClass().getClassLoader().getResourceAsStream("template/运营数据报表模板.xlsx");
+        XSSFWorkbook excel = null;
+        try {
+            if (inputStream != null) {
+                excel = new XSSFWorkbook(inputStream);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        // 1. 查询数据库中营业数据 -- 查询最近30天的数据
+        LocalDate begin = LocalDate.now().minusDays(30);
+        LocalDate end = LocalDate.now().minusDays(1);
+
+        BusinessDataVO businessData = workspaceService.getBusinessData(begin.atTime(LocalTime.MIN), end.atTime(LocalTime.MAX));
+
+        // 1.1 查询近30天的营业额
+        Double turnover = businessData.getTurnover();
+        // 1.2 查询有效订单数
+        Integer validOrderCount = businessData.getValidOrderCount();
+        // 1.3 订单完成率
+        Double orderCompletionRate = businessData.getOrderCompletionRate();
+        // 1.4 计算平均客单价
+        Double averageTransactionPrice = businessData.getUnitPrice();
+        // 1.5 查询新增用户数
+        Integer newUsers = businessData.getNewUsers();
+        // 填充概览数据
+        XSSFSheet sheet = null;
+        if (excel != null) {
+            sheet = excel.getSheetAt(0);
+            // 时间
+            sheet.getRow(1).getCell(1).setCellValue("时间：" + begin + "至" + end);
+            // 营业额
+            XSSFRow row = sheet.getRow(3);
+            row.getCell(2).setCellValue(turnover);
+            row.getCell(4).setCellValue(orderCompletionRate);
+            row.getCell(6).setCellValue(newUsers);
+            row = sheet.getRow(4);
+            row.getCell(2).setCellValue(validOrderCount);
+            row.getCell(4).setCellValue(averageTransactionPrice);
+        } else {
+            throw new RuntimeException("Excel错误！");
+        }
+
+        // 1.6 明细数据，每日的以上五个点
+        ArrayList<LocalDate> localDateList = new ArrayList<>();
+        // 得到中间所有日期
+        LocalDate tempBegin = begin;
+        while (!tempBegin.isAfter(end)) {
+            localDateList.add(tempBegin);
+            tempBegin = tempBegin.plusDays(1);
+        }
+        // 遍历中间日，得到营业数据，并写入Excel
+        for (int i = 0; i < localDateList.size(); i++) {
+            LocalDate date = localDateList.get(i);
+            LocalDateTime dateTimeLeft = date.atTime(LocalTime.MIN);
+            LocalDateTime dateTimeRight = date.atTime(LocalTime.MAX);
+            BusinessDataVO data = workspaceService.getBusinessData(dateTimeLeft, dateTimeRight);
+            // 将这日数据写入Excel
+            XSSFRow row = sheet.getRow(i + 7);
+            row.getCell(1).setCellValue(String.valueOf(date));
+            row.getCell(2).setCellValue(data.getTurnover());
+            row.getCell(3).setCellValue(data.getValidOrderCount());
+            row.getCell(4).setCellValue(data.getOrderCompletionRate());
+            row.getCell(5).setCellValue(data.getUnitPrice());
+            row.getCell(6).setCellValue(data.getNewUsers());
+        }
+
+        // 2. 使用输出流下载到用户的浏览器上
+        excel.write(response.getOutputStream());
+        excel.close();
+        inputStream.close();
     }
 }
