@@ -3,62 +3,107 @@
 <mapper namespace="com.sky.mapper.OrdersMapper">
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         insert into orders(number, status, user_id, address_book_id, order_time, pay_method, pay_status, amount, remark,
-                           phone,
-                           address,
-                           consignee, estimated_delivery_time,
-                           delivery_status,
-                           pack_amount, tableware_number, tableware_status, checkout_time, user_name, cancel_time,
-                           rejection_reason, cancel_reason, delivery_time)
-        VALUES (#{number}, #{status}, #{userId}, #{addressBookId}, #{orderTime}, #{payMethod}, #{payStatus}, #{amount},
-                #{remark},
-                #{phone}, #{address}, #{consignee},
-                #{estimatedDeliveryTime}, #{deliveryStatus}, #{packAmount}, #{tablewareNumber},
-                #{tablewareStatus}, #{checkoutTime}, #{userName}, #{cancelTime}, #{rejectionReason}, #{cancelReason},
-                #{deliveryTime})
-
+                           phone, address, consignee, estimated_delivery_time, delivery_status, pack_amount,
+                           tableware_number, tableware_status, checkout_time, user_name, cancel_time, rejection_reason,
+                           cancel_reason, delivery_time, version)
+        values (#{number}, #{status}, #{userId}, #{addressBookId}, #{orderTime}, #{payMethod}, #{payStatus},
+                #{amount}, #{remark}, #{phone}, #{address}, #{consignee}, #{estimatedDeliveryTime},
+                #{deliveryStatus}, #{packAmount}, #{tablewareNumber}, #{tablewareStatus}, #{checkoutTime},
+                #{userName}, #{cancelTime}, #{rejectionReason}, #{cancelReason}, #{deliveryTime}, #{version})
     </insert>
+
     <update id="update" parameterType="com.sky.entity.Orders">
         update orders
         <set>
-            <if test="cancelReason != null and cancelReason!='' ">
-                cancel_reason=#{cancelReason},
+            <if test="cancelReason != null and cancelReason!=''">
+                cancel_reason = #{cancelReason},
             </if>
-            <if test="rejectionReason != null and rejectionReason!='' ">
-                rejection_reason=#{rejectionReason},
+            <if test="rejectionReason != null and rejectionReason!=''">
+                rejection_reason = #{rejectionReason},
             </if>
             <if test="cancelTime != null">
-                cancel_time=#{cancelTime},
+                cancel_time = #{cancelTime},
             </if>
             <if test="payStatus != null">
-                pay_status=#{payStatus},
+                pay_status = #{payStatus},
             </if>
             <if test="payMethod != null">
-                pay_method=#{payMethod},
+                pay_method = #{payMethod},
             </if>
             <if test="checkoutTime != null">
-                checkout_time=#{checkoutTime},
+                checkout_time = #{checkoutTime},
             </if>
             <if test="status != null">
                 status = #{status},
             </if>
             <if test="deliveryTime != null">
-                delivery_time = #{deliveryTime}
+                delivery_time = #{deliveryTime},
+            </if>
+            <if test="version != null">
+                version = version + 1,
             </if>
         </set>
         where id = #{id}
     </update>
+
+    <update id="updateByIdAndStatus">
+        update orders
+        <set>
+            <if test="orders.cancelReason != null and orders.cancelReason!=''">
+                cancel_reason = #{orders.cancelReason},
+            </if>
+            <if test="orders.rejectionReason != null and orders.rejectionReason!=''">
+                rejection_reason = #{orders.rejectionReason},
+            </if>
+            <if test="orders.cancelTime != null">
+                cancel_time = #{orders.cancelTime},
+            </if>
+            <if test="orders.payStatus != null">
+                pay_status = #{orders.payStatus},
+            </if>
+            <if test="orders.payMethod != null">
+                pay_method = #{orders.payMethod},
+            </if>
+            <if test="orders.checkoutTime != null">
+                checkout_time = #{orders.checkoutTime},
+            </if>
+            <if test="orders.status != null">
+                status = #{orders.status},
+            </if>
+            <if test="orders.deliveryTime != null">
+                delivery_time = #{orders.deliveryTime},
+            </if>
+            <if test="orders.version != null">
+                version = version + 1,
+            </if>
+        </set>
+        where id = #{orders.id}
+          and status = #{oldStatus}
+        <if test="oldPayStatus != null">
+            and pay_status = #{oldPayStatus}
+        </if>
+        <if test="orders.version != null">
+            and version = #{orders.version}
+        </if>
+    </update>
+
     <update id="updateBatch">
         update orders
-        <set>status = #{targetStatus} , cancel_time = now() ,
+        <set>
+            status = #{targetStatus},
+            version = version + 1,
+            cancel_time = now()
             <if test="reason != null">
-                cancel_reason = #{reason}
+                ,cancel_reason = #{reason}
             </if>
         </set>
         where id in
         <foreach collection="orderIds" item="id" open="(" close=")" separator=",">
             #{id}
         </foreach>
+          and status = #{oldStatus}
     </update>
+
     <select id="page" resultType="com.sky.entity.Orders">
         select *
         from orders
@@ -71,16 +116,19 @@
         </where>
         order by order_time desc
     </select>
+
     <select id="getTimeoutOrder" resultType="long">
         select id
         from orders
         where status = 1 and order_time &lt;= DATE_SUB(NOW(),INTERVAL 15 MINUTE)
     </select>
+
     <select id="getINProcessOrder" resultType="long">
         select id
         from orders
         where status = 4 and estimated_delivery_time &lt;= DATE_SUB(now(),INTERVAL 1 HOUR)
     </select>
+
     <select id="turnoverStatistics" resultType="java.util.Map">
         select DATE_FORMAT(checkout_time, '%Y-%m-%d') orderDate, SUM(amount) amount
         from orders
@@ -88,6 +136,7 @@
           and checkout_time between #{begin} and #{end}
         group by orderDate
     </select>
+
     <select id="countByTime" resultType="java.lang.Integer">
         select count(*)
         from orders
@@ -97,6 +146,7 @@
             <if test="end != null">and checkout_time &lt;= #{end}</if>
         </where>
     </select>
+
     <select id="getByTime" resultType="java.lang.Integer">
         select id
         from orders
@@ -106,6 +156,7 @@
             and status = 5
         </where>
     </select>
+
     <select id="turnoverStatisticsDaily" resultType="java.lang.Double">
         select ifnull(SUM(amount),0)
         from orders

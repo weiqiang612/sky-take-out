@@ -44,6 +44,13 @@ public interface OrdersMapper {
     void update(Orders orders);
 
     /**
+     * Conditional order update with optimistic lock support.
+     */
+    int updateByIdAndStatus(@Param("orders") Orders orders,
+                            @Param("oldStatus") Integer oldStatus,
+                            @Param("oldPayStatus") Integer oldPayStatus);
+
+    /**
      * 管理端分页查询
      * @param ordersPageQueryDTO
      * @return
@@ -94,7 +101,10 @@ public interface OrdersMapper {
      */
     List<Long> getINProcessOrder();
 
-    void updateBatch(List<Long> orderIds, long targetStatus, String reason);
+    int updateBatch(@Param("orderIds") List<Long> orderIds,
+                    @Param("oldStatus") Integer oldStatus,
+                    @Param("targetStatus") Integer targetStatus,
+                    @Param("reason") String reason);
 
     /**
      * 营业额统计
