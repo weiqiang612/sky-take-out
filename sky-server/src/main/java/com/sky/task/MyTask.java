@@ -15,13 +15,6 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * @author weiqiang
- * @version 1.0
- * @Date 2026/3/24 15:15
- */
-
-
 @Component
 @Slf4j
 public class MyTask {
@@ -32,11 +25,11 @@ public class MyTask {
     private OrdersMapper ordersMapper;
 
     /**
-     * 每分钟检查是否有超时未支付订单，如果有，自动取消
+     * 每分钟检查是否有超时未支付订单，如果有则自动取消。
      */
     @Scheduled(cron = "0 * * * * ?")
     public void rejectTimeoutOrder() {
-        log.info("开始执行cancelTimeoutOrder定时任务...");
+        log.info("开始执行 cancelTimeoutOrder 定时任务...");
         List<Long> orderIds = ordersMapper.getTimeoutOrder();
         // 1. 没有符合条件的订单直接返回
         if (CollectionUtils.isEmpty(orderIds)) {
@@ -44,22 +37,22 @@ public class MyTask {
         }
 
         // 2. 批量取消订单
-        ordersMapper.updateBatch(orderIds,6,"订单超时未支付，自动取消！");
-        log.info("成功取消{}个订单！", orderIds.size());
+        ordersMapper.updateBatch(orderIds, Orders.PENDING_PAYMENT, Orders.CANCELLED, "订单超时未支付，自动取消！");
+        log.info("成功取消 {} 个订单！", orderIds.size());
     }
 
     /**
-     * 每天凌晨自动完成派送中的订单
+     * 每天凌晨自动完成派送中的订单。
      */
     @Scheduled(cron = "0 0 1 * * ?")
     public void completeINProcessOrder() {
-        log.info("开始执行completeINProcessOrder任务...");
+        log.info("开始执行 completeINProcessOrder 任务...");
         List<Long> orderIds = ordersMapper.getINProcessOrder();
         if (CollectionUtils.isEmpty(orderIds)) {
             return;
         }
         // 批量完成订单
-        ordersMapper.updateBatch(orderIds,5,null);
+        ordersMapper.updateBatch(orderIds, Orders.DELIVERY_IN_PROGRESS, Orders.COMPLETED, null);
     }
 
 }
