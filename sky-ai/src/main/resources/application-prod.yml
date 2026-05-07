@@ -1,0 +1,27 @@
+server:
+  port: ${SERVER_PORT}
+
+spring:
+  datasource:
+    url: ${SKY_AI_DATASOURCE_URL}
+    username: ${SKY_AI_DATASOURCE_USERNAME}
+    password: ${SKY_AI_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  ai:
+    model:
+      chat: ollama
+      embedding: ollama
+    ollama:
+      base-url: ${OLLAMA_BASE_URL}
+      chat:
+        options:
+          model: ${OLLAMA_CHAT_MODEL}
+      embedding:
+        options:
+          model: ${OLLAMA_EMBEDDING_MODEL}
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        dimensions: 1024
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE

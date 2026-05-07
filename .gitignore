@@ -1,6 +1,44 @@
+# Maven / Java build outputs
 **/target/
-.idea
-*.iml
+**/out/
 *.class
-*Test.java
-**/test/
+
+# Logs / crash dumps
+*.log
+logs/
+hs_err_pid*
+replay_pid*
+
+# IntelliJ IDEA / VS Code
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# Eclipse / STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Local-only env/config files
+.env
+.env.*
+!.env.example
+**/application-local.yml
+**/application-local.yaml

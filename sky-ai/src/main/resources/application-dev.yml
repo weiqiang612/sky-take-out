@@ -1,0 +1,27 @@
+spring:
+  datasource:
+    url: ${SKY_AI_DEV_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/rag_db}
+    username: ${SKY_AI_DEV_DATASOURCE_USERNAME:postgres}
+    password: ${SKY_AI_DEV_DATASOURCE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  ai:
+    model:
+      chat: openai
+      embedding: ollama
+    openai:
+      base-url: ${OPENAI_BASE_URL:http://127.0.0.1:3030}
+      api-key: ${OPENAI_API_KEY:temp_key}
+      chat:
+        options:
+          model: ${OPENAI_CHAT_MODEL:gpt-5-mini}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
+      embedding:
+        options:
+          model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        dimensions: 1024
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE

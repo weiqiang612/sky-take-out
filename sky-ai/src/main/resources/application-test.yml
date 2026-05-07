@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: ${SKY_AI_TEST_DATASOURCE_URL}
+    username: ${SKY_AI_TEST_DATASOURCE_USERNAME}
+    password: ${SKY_AI_TEST_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  ai:
+    model:
+      chat: openai
+      embedding: openai
+    openai:
+      base-url: ${OPENAI_BASE_URL}
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: ${OPENAI_CHAT_MODEL:gpt-4o-mini}
+      embedding:
+        options:
+          model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        dimensions: 1536
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE

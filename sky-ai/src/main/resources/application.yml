@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: sky-ai
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+server:
+  port: ${SERVER_PORT:8081}
