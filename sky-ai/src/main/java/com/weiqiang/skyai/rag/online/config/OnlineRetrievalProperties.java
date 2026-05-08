@@ -27,7 +27,7 @@ public class OnlineRetrievalProperties {
      */
     private boolean fallbackToEmbeddingResultsOnRerankFailure = true;
 
-    private final Ollama ollama = new Ollama();
+    private final SiliconFlow siliconFlow = new SiliconFlow();
 
     private final Context context = new Context();
 
@@ -63,22 +63,21 @@ public class OnlineRetrievalProperties {
         this.fallbackToEmbeddingResultsOnRerankFailure = fallbackToEmbeddingResultsOnRerankFailure;
     }
 
-    public Ollama getOllama() {
-        return ollama;
+    public SiliconFlow getSiliconFlow() {
+        return siliconFlow;
     }
 
     public Context getContext() {
         return context;
     }
 
-    public static class Ollama {
+    public static class SiliconFlow {
 
-        private String baseUrl = "http://127.0.0.1:11434";
+        private String baseUrl = "https://api.siliconflow.cn";
 
-        /**
-         * Ollama embedding-style reranker model name.
-         */
-        private String rerankerModel = "bge-reranker-v2-m3:q4_k_m";
+        private String apiKey;
+
+        private String model = "BAAI/bge-reranker-v2-m3";
 
         public String getBaseUrl() {
             return baseUrl;
@@ -88,12 +87,20 @@ public class OnlineRetrievalProperties {
             this.baseUrl = baseUrl;
         }
 
-        public String getRerankerModel() {
-            return rerankerModel;
+        public String getApiKey() {
+            return apiKey;
         }
 
-        public void setRerankerModel(String rerankerModel) {
-            this.rerankerModel = rerankerModel;
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model;
         }
     }
 

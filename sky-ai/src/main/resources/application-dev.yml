@@ -19,10 +19,6 @@ spring:
       embedding:
         options:
           model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
-      # 自定义 Reranker 配置，用于在代码中读取
-      reranker:
-        options:
-          model: ${OLLAMA_RERANKER_MODEL:qllama/bge-reranker-v2-m3:q4_k_m}
     vectorstore:
       pgvector:
         initialize-schema: true
@@ -35,8 +31,9 @@ skyai:
     online:
       top-k: ${SKY_AI_RETRIEVAL_TOP_K:80}
       top-n: ${SKY_AI_RETRIEVAL_TOP_N:8}
-      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.0}
+      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.7}
       fallback-to-embedding-results-on-rerank-failure: ${SKY_AI_RETRIEVAL_FALLBACK_ON_RERANK_FAILURE:true}
-      ollama:
-        base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
-        reranker-model: ${OLLAMA_RERANKER_MODEL:qllama/bge-reranker-v2-m3:q4_k_m}
+      siliconflow:
+        base-url: ${SILICONFLOW_BASE_URL:https://api.siliconflow.cn}
+        api-key: ${SILICONFLOW_API_KEY:}
+        model: ${SILICONFLOW_RERANKER_MODEL:BAAI/bge-reranker-v2-m3}

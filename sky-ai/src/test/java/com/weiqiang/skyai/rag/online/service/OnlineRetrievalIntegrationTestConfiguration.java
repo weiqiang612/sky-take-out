@@ -12,7 +12,7 @@ import org.springframework.web.client.RestClient;
         RerankingService.class,
         ContextAssemblyService.class,
         OnlineRetrievalService.class,
-        OllamaEmbedRerankerClient.class
+        SiliconFlowRerankerClient.class
 })
 class OnlineRetrievalIntegrationTestConfiguration {
 

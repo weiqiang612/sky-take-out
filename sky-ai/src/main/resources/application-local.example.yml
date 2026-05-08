@@ -20,3 +20,11 @@ spring:
         options:
           model: bge-m3
 
+skyai:
+  retrieval:
+    online:
+      siliconflow:
+        base-url: https://api.siliconflow.cn
+        api-key: ""
+        model: BAAI/bge-reranker-v2-m3
+

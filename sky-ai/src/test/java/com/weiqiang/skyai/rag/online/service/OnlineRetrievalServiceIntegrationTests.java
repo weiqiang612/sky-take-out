@@ -14,6 +14,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.http.HttpMethod.POST;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -28,6 +29,8 @@ class OnlineRetrievalServiceIntegrationTests {
             OnlineRetrievalProperties properties = context.getBean(OnlineRetrievalProperties.class);
             properties.setTopK(4);
             properties.setTopN(2);
+            properties.getSiliconFlow().setApiKey("test-key");
+            properties.getSiliconFlow().setBaseUrl("https://api.siliconflow.cn");
 
             MutableVectorStoreStub vectorStoreStub = context.getBean(MutableVectorStoreStub.class);
             vectorStoreStub.setSearchResults(List.of(
@@ -37,17 +40,39 @@ class OnlineRetrievalServiceIntegrationTests {
 
             RestClient.Builder restClientBuilder = context.getBean(RestClient.Builder.class);
             MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder).build();
-            server.expect(requestTo("http://127.0.0.1:11434/api/embed"))
+            server.expect(requestTo("https://api.siliconflow.cn/v1/rerank"))
                     .andExpect(method(POST))
+                    .andExpect(header("Authorization", "Bearer test-key"))
                     .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(content().string("""
+                            {"model":"BAAI/bge-reranker-v2-m3","query":"what is chunk-b","documents":["chunk-a","chunk-b"],"top_n":2,"return_documents":true}
+                            """.trim()))
                     .andRespond(withSuccess("""
                             {
-                              "model": "bge-reranker-v2-m3:q4_k_m",
-                              "embeddings": [
-                                [1.0, 0.0],
-                                [0.9, 0.0],
-                                [0.8, 0.0]
-                              ]
+                              "id": "rerank-123",
+                              "results": [
+                                {
+                                  "index": 1,
+                                  "document": {
+                                    "text": "chunk-a"
+                                  },
+                                  "relevance_score": 0.82
+                                },
+                                {
+                                  "index": 2,
+                                  "document": {
+                                    "text": "chunk-b"
+                                  },
+                                  "relevance_score": 0.98
+                                }
+                              ],
+                              "meta": {
+                                "tokens": {
+                                  "input_tokens": 10,
+                                  "output_tokens": 0,
+                                  "image_tokens": 0
+                                }
+                              }
                             }
                             """, MediaType.APPLICATION_JSON));
 
@@ -55,7 +80,7 @@ class OnlineRetrievalServiceIntegrationTests {
             RetrievalResult result = onlineRetrievalService.retrieve("what is chunk-b");
 
             assertEquals(2, result.chunks().size());
-            assertEquals("chunk-a", result.chunks().get(0).content());
+            assertEquals("chunk-b", result.chunks().get(0).content());
             assertTrue(result.context().contains("chunk-a"));
             assertTrue(result.context().contains("chunk-b"));
             server.verify();
