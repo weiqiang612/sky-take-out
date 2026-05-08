@@ -23,3 +23,14 @@ spring:
         dimensions: 1536
         index-type: HNSW
         distance-type: COSINE_DISTANCE
+
+skyai:
+  retrieval:
+    online:
+      top-k: 3
+      top-n: 2
+      similarity-threshold: 0.0
+      fallback-to-embedding-results-on-rerank-failure: true
+      ollama:
+        base-url: http://127.0.0.1:11434
+        reranker-model: bge-reranker-v2-m3:q4_k_m

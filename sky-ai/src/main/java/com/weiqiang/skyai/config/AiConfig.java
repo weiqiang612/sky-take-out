@@ -28,8 +28,8 @@ public class AiConfig {
     @Bean
     public ChatClient.Builder gptChatClient(ChatModel openAiChatModel) {
         // 专门用于对话的 Client Builder
-        return ChatClient.builder(openAiChatModel)
-                .defaultAdvisors(QuestionAnswerAdvisor.builder(vectorStore).build());
+        return ChatClient.builder(openAiChatModel);
+//                .defaultAdvisors(QuestionAnswerAdvisor.builder(vectorStore).build());
     }
 
 }

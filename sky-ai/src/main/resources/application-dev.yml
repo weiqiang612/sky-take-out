@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: ${SKY_AI_DEV_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/rag_db}
+    url: ${SKY_AI_DEV_DATASOURCE_URL:jdbc:postgresql://10.67.215.250:5432/rag_db}
     username: ${SKY_AI_DEV_DATASOURCE_USERNAME:postgres}
     password: ${SKY_AI_DEV_DATASOURCE_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
@@ -19,9 +19,24 @@ spring:
       embedding:
         options:
           model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
+      # 自定义 Reranker 配置，用于在代码中读取
+      reranker:
+        options:
+          model: ${OLLAMA_RERANKER_MODEL:qllama/bge-reranker-v2-m3:q4_k_m}
     vectorstore:
       pgvector:
         initialize-schema: true
         dimensions: 1024
         index-type: HNSW
         distance-type: COSINE_DISTANCE
+
+skyai:
+  retrieval:
+    online:
+      top-k: ${SKY_AI_RETRIEVAL_TOP_K:80}
+      top-n: ${SKY_AI_RETRIEVAL_TOP_N:8}
+      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.0}
+      fallback-to-embedding-results-on-rerank-failure: ${SKY_AI_RETRIEVAL_FALLBACK_ON_RERANK_FAILURE:true}
+      ollama:
+        base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
+        reranker-model: ${OLLAMA_RERANKER_MODEL:qllama/bge-reranker-v2-m3:q4_k_m}
