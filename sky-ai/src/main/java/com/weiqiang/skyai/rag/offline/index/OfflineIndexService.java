@@ -11,6 +11,7 @@ import com.weiqiang.skyai.rag.offline.model.RagDocumentSummary;
 import com.weiqiang.skyai.rag.offline.parse.DocumentParser;
 import com.weiqiang.skyai.rag.offline.store.RagIndexRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -35,6 +36,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class OfflineIndexService {
 
@@ -90,6 +92,8 @@ public class OfflineIndexService {
             repository.saveChunks(embeddedChunks);
             vectorStore.add(embeddedChunks.stream().map(chunk -> toVectorDocument(chunk, contentHash)).toList());
             repository.updateDocumentStatus(documentId, embeddedChunks.size(), "INDEXED");
+            log.info("离线索引写入完成，documentId={}，indexVersion={}，chunkCount={}，rag_chunk=已写入，vectorStore=已写入",
+                    documentId, indexVersion, embeddedChunks.size());
             // 5. 返回索引结果
             return new OfflineIndexResponse(documentId, indexVersion, document.documentType(), document.sourceName(),
                     embeddedChunks.size(), "INDEXED");

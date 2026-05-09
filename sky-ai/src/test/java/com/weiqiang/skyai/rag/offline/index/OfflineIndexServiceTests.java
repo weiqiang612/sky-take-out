@@ -191,7 +191,7 @@ class OfflineIndexServiceTests {
         private final java.util.Set<String> chunkHashes = new java.util.HashSet<>();
 
         FakeRagIndexRepository() {
-            super(null, null);
+            super(null, null, null, null);
         }
 
         @Override

@@ -31,7 +31,7 @@ skyai:
     online:
       top-k: ${SKY_AI_RETRIEVAL_TOP_K:80}
       top-n: ${SKY_AI_RETRIEVAL_TOP_N:8}
-      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.7}
+      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.5}
       fallback-to-embedding-results-on-rerank-failure: ${SKY_AI_RETRIEVAL_FALLBACK_ON_RERANK_FAILURE:true}
       query-expansion:
         enabled: ${SKY_AI_QUERY_EXPANSION_ENABLED:true}
