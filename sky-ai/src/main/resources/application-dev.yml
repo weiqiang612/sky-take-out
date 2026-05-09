@@ -33,6 +33,16 @@ skyai:
       top-n: ${SKY_AI_RETRIEVAL_TOP_N:8}
       similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.7}
       fallback-to-embedding-results-on-rerank-failure: ${SKY_AI_RETRIEVAL_FALLBACK_ON_RERANK_FAILURE:true}
+      query-expansion:
+        enabled: ${SKY_AI_QUERY_EXPANSION_ENABLED:true}
+        max-queries: ${SKY_AI_QUERY_EXPANSION_MAX_QUERIES:2}
+        fallback-on-failure: ${SKY_AI_QUERY_EXPANSION_FALLBACK_ON_FAILURE:true}
+      keyword:
+        enabled: ${SKY_AI_KEYWORD_RETRIEVAL_ENABLED:true}
+        top-k: ${SKY_AI_KEYWORD_RETRIEVAL_TOP_K:40}
+      fusion:
+        max-candidates: ${SKY_AI_RETRIEVAL_FUSION_MAX_CANDIDATES:120}
+        rrf-k: ${SKY_AI_RETRIEVAL_FUSION_RRF_K:60}
       siliconflow:
         base-url: ${SILICONFLOW_BASE_URL:https://api.siliconflow.cn}
         api-key: ${SILICONFLOW_API_KEY:}

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 基于向量检索的候选文本检索服务
@@ -28,6 +29,19 @@ public class EmbeddingRetrievalService {
     private final OnlineRetrievalProperties properties;
 
     public List<RetrievedChunk> retrieveCandidates(String query) {
+        return retrieveCandidates(query, "embedding_original");
+    }
+
+    public List<RetrievedChunk> retrieveCandidates(List<String> queries) {
+        List<RetrievedChunk> candidates = new ArrayList<>();
+        for (int i = 0; i < queries.size(); i++) {
+            String source = i == 0 ? "embedding_original" : "embedding_expanded";
+            candidates.addAll(retrieveCandidates(queries.get(i), source));
+        }
+        return candidates;
+    }
+
+    private List<RetrievedChunk> retrieveCandidates(String query, String retrievalSource) {
         SearchRequest request = SearchRequest.builder()
                 .query(query)
                 .topK(properties.getTopK())
@@ -37,18 +51,21 @@ public class EmbeddingRetrievalService {
         List<Document> documents = vectorStore.similaritySearch(request);
         List<RetrievedChunk> candidates = new ArrayList<>(documents.size());
         for (Document document : documents) {
-            candidates.add(toRetrievedChunk(document));
+            candidates.add(toRetrievedChunk(document, retrievalSource, query));
         }
 
-        log.info("在线检索 Step1 完成，query={}，候选数={}", query, candidates.size());
+        log.info("在线检索向量召回完成，source={}，query={}，候选数={}", retrievalSource, query, candidates.size());
         return candidates;
     }
 
-    private RetrievedChunk toRetrievedChunk(Document document) {
+    private RetrievedChunk toRetrievedChunk(Document document, String retrievalSource, String matchedQuery) {
         Double score = document.getScore();
+        Map<String, Object> metadata = new LinkedHashMap<>(document.getMetadata());
+        metadata.put("retrievalSources", List.of(retrievalSource));
+        metadata.put("matchedQuery", matchedQuery);
         return new RetrievedChunk(
                 document.getText() == null ? "" : document.getText(),
-                new LinkedHashMap<>(document.getMetadata()),
+                metadata,
                 score == null ? 0.0d : score,
                 null
         );

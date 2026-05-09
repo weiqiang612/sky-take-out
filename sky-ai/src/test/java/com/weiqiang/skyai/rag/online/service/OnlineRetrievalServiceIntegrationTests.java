@@ -2,6 +2,7 @@ package com.weiqiang.skyai.rag.online.service;
 
 import com.weiqiang.skyai.rag.online.config.OnlineRetrievalProperties;
 import com.weiqiang.skyai.rag.online.model.RetrievalResult;
+import com.weiqiang.skyai.rag.offline.model.KeywordSearchResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -83,6 +84,81 @@ class OnlineRetrievalServiceIntegrationTests {
             assertEquals("chunk-b", result.chunks().get(0).content());
             assertTrue(result.context().contains("chunk-a"));
             assertTrue(result.context().contains("chunk-b"));
+            server.verify();
+        }
+    }
+
+    @Test
+    void retrieveFusesOriginalExpandedAndKeywordCandidatesBeforeSingleRerank() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(OnlineRetrievalIntegrationTestConfiguration.class)) {
+            OnlineRetrievalProperties properties = context.getBean(OnlineRetrievalProperties.class);
+            properties.setTopK(3);
+            properties.setTopN(3);
+            properties.getQueryExpansion().setMaxQueries(1);
+            properties.getKeyword().setTopK(2);
+            properties.getSiliconFlow().setApiKey("test-key");
+            properties.getSiliconFlow().setBaseUrl("https://api.siliconflow.cn");
+
+            MutableQueryExpansionClientStub queryExpansionClient = context.getBean(MutableQueryExpansionClientStub.class);
+            queryExpansionClient.setResponse("[\"callback 支付回调\"]");
+
+            MutableVectorStoreStub vectorStoreStub = context.getBean(MutableVectorStoreStub.class);
+            vectorStoreStub.setSearchResults("callback", List.of(
+                    Document.builder().text("vector original").metadata(Map.of("chunkHash", "hash-vector")).score(0.91d).build()
+            ));
+            vectorStoreStub.setSearchResults("callback 支付回调", List.of(
+                    Document.builder().text("vector expanded").metadata(Map.of("chunkHash", "hash-expanded")).score(0.87d).build()
+            ));
+
+            MutableKeywordChunkRepositoryStub keywordRepository = context.getBean(MutableKeywordChunkRepositoryStub.class);
+            keywordRepository.setResults(List.of(
+                    new KeywordSearchResult("keyword exact", Map.of("chunkHash", "hash-keyword"), 4.0d)
+            ));
+
+            RestClient.Builder restClientBuilder = context.getBean(RestClient.Builder.class);
+            MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder).build();
+            server.expect(requestTo("https://api.siliconflow.cn/v1/rerank"))
+                    .andExpect(method(POST))
+                    .andExpect(header("Authorization", "Bearer test-key"))
+                    .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(content().string("""
+                            {"model":"BAAI/bge-reranker-v2-m3","query":"callback","documents":["vector original","keyword exact","vector expanded"],"top_n":3,"return_documents":true}
+                            """.trim()))
+                    .andRespond(withSuccess("""
+                            {
+                              "results": [
+                                {
+                                  "index": 2,
+                                  "document": {
+                                    "text": "vector expanded"
+                                  },
+                                  "relevance_score": 0.99
+                                },
+                                {
+                                  "index": 1,
+                                  "document": {
+                                    "text": "keyword exact"
+                                  },
+                                  "relevance_score": 0.88
+                                },
+                                {
+                                  "index": 0,
+                                  "document": {
+                                    "text": "vector original"
+                                  },
+                                  "relevance_score": 0.77
+                                }
+                              ]
+                            }
+                            """, MediaType.APPLICATION_JSON));
+
+            OnlineRetrievalService onlineRetrievalService = context.getBean(OnlineRetrievalService.class);
+            RetrievalResult result = onlineRetrievalService.retrieve("callback");
+
+            assertEquals(2, vectorStoreStub.getSearchRequests().size());
+            assertEquals("vector expanded", result.chunks().get(0).content());
+            assertEquals("keyword exact", result.chunks().get(1).content());
+            assertEquals(List.of("keyword"), result.chunks().get(1).metadata().get("retrievalSources"));
             server.verify();
         }
     }

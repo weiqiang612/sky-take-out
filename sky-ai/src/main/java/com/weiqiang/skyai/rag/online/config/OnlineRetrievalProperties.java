@@ -31,6 +31,12 @@ public class OnlineRetrievalProperties {
 
     private final Context context = new Context();
 
+    private final QueryExpansion queryExpansion = new QueryExpansion();
+
+    private final Keyword keyword = new Keyword();
+
+    private final Fusion fusion = new Fusion();
+
     public int getTopK() {
         return topK;
     }
@@ -69,6 +75,18 @@ public class OnlineRetrievalProperties {
 
     public Context getContext() {
         return context;
+    }
+
+    public QueryExpansion getQueryExpansion() {
+        return queryExpansion;
+    }
+
+    public Keyword getKeyword() {
+        return keyword;
+    }
+
+    public Fusion getFusion() {
+        return fusion;
     }
 
     public static class SiliconFlow {
@@ -129,6 +147,85 @@ public class OnlineRetrievalProperties {
 
         public void setPreferredTextMetadataKeys(List<String> preferredTextMetadataKeys) {
             this.preferredTextMetadataKeys = preferredTextMetadataKeys;
+        }
+    }
+
+    public static class QueryExpansion {
+
+        private boolean enabled = true;
+
+        private int maxQueries = 2;
+
+        private boolean fallbackOnFailure = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getMaxQueries() {
+            return maxQueries;
+        }
+
+        public void setMaxQueries(int maxQueries) {
+            this.maxQueries = maxQueries;
+        }
+
+        public boolean isFallbackOnFailure() {
+            return fallbackOnFailure;
+        }
+
+        public void setFallbackOnFailure(boolean fallbackOnFailure) {
+            this.fallbackOnFailure = fallbackOnFailure;
+        }
+    }
+
+    public static class Keyword {
+
+        private boolean enabled = true;
+
+        private int topK = 40;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getTopK() {
+            return topK;
+        }
+
+        public void setTopK(int topK) {
+            this.topK = topK;
+        }
+    }
+
+    public static class Fusion {
+
+        private int maxCandidates = 120;
+
+        private int rrfK = 60;
+
+        public int getMaxCandidates() {
+            return maxCandidates;
+        }
+
+        public void setMaxCandidates(int maxCandidates) {
+            this.maxCandidates = maxCandidates;
+        }
+
+        public int getRrfK() {
+            return rrfK;
+        }
+
+        public void setRrfK(int rrfK) {
+            this.rrfK = rrfK;
         }
     }
 }

@@ -1,12 +1,15 @@
 package com.weiqiang.skyai.rag.offline.store;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.rag.offline.model.DocumentType;
 import com.weiqiang.skyai.rag.offline.model.EmbeddedRagChunk;
+import com.weiqiang.skyai.rag.offline.model.KeywordSearchResult;
 import com.weiqiang.skyai.rag.offline.model.RagDocumentSummary;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -15,10 +18,18 @@ import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+@Slf4j
 @Repository
 @RequiredArgsConstructor
-public class RagIndexRepository {
+public class RagIndexRepository implements KeywordChunkRepository {
+
+    private static final Pattern KEYWORD_PATTERN = Pattern.compile("[\\p{IsHan}A-Za-z0-9_\\-]+");
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -76,6 +87,10 @@ public class RagIndexRepository {
         jdbcTemplate.execute("""
                 create unique index if not exists ux_rag_chunk_chunk_hash
                 on rag_chunk(chunk_hash)
+                """);
+        jdbcTemplate.execute("""
+                create index if not exists idx_rag_chunk_content_fts
+                on rag_chunk using gin (to_tsvector('simple', content))
                 """);
     }
 
@@ -139,6 +154,37 @@ public class RagIndexRepository {
                 """, this::mapDocument);
     }
 
+    @Override
+    public List<KeywordSearchResult> searchChunksByKeyword(String query, int topK) {
+        List<KeywordSearchResult> ranked = jdbcTemplate.query("""
+                select content, metadata_json, ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', ?)) as score
+                from rag_chunk
+                where to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)
+                order by score desc, created_at desc
+                limit ?
+                """, this::mapKeywordSearchResult, query, query, topK);
+        if (!ranked.isEmpty()) {
+            return ranked;
+        }
+
+        List<String> keywords = extractKeywords(query);
+        String whereClause = String.join(" or ", keywords.stream()
+                .map(ignored -> "content ilike ? escape '\\'")
+                .toList());
+        List<Object> args = new ArrayList<>();
+        for (String keyword : keywords) {
+            args.add("%" + escapeLike(keyword) + "%");
+        }
+        args.add(topK);
+        return jdbcTemplate.query("""
+                select content, metadata_json, 1.0 as score
+                from rag_chunk
+                where %s
+                order by created_at desc
+                limit ?
+                """.formatted(whereClause), this::mapKeywordSearchResult, args.toArray());
+    }
+
     private void saveChunk(EmbeddedRagChunk chunk) {
         jdbcTemplate.update("""
                 insert into rag_chunk(chunk_id, chunk_hash, document_id, index_version, chunk_index, content, metadata_json, vector_store_id)
@@ -166,6 +212,48 @@ public class RagIndexRepository {
                 rs.getObject("created_at", OffsetDateTime.class),
                 rs.getObject("updated_at", OffsetDateTime.class)
         );
+    }
+
+    private KeywordSearchResult mapKeywordSearchResult(ResultSet rs, int rowNum) throws SQLException {
+        return new KeywordSearchResult(
+                rs.getString("content"),
+                metadataFromJson(rs.getString("metadata_json")),
+                rs.getDouble("score")
+        );
+    }
+
+    private Map<String, Object> metadataFromJson(String metadataJson) {
+        if (metadataJson == null || metadataJson.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(metadataJson, new TypeReference<LinkedHashMap<String, Object>>() {
+            });
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to deserialize chunk metadata", ex);
+        }
+    }
+
+    private String escapeLike(String value) {
+        return value.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+    }
+
+    private List<String> extractKeywords(String query) {
+        List<String> keywords = new ArrayList<>();
+        Matcher matcher = KEYWORD_PATTERN.matcher(query);
+        while (matcher.find()) {
+            String keyword = matcher.group().trim();
+            if (!keyword.isBlank()) {
+                keywords.add(keyword);
+            }
+        }
+        if (keywords.isEmpty()) {
+            keywords.add(query);
+        }
+        log.info("提取关键词完成，query={}，keywords={}", query, keywords);
+        return keywords;
     }
 
     private String metadataJson(EmbeddedRagChunk chunk) {
