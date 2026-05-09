@@ -2,7 +2,6 @@ package com.weiqiang.skyai.controller;
 
 import com.weiqiang.skyai.rag.online.model.RetrievalResult;
 import com.weiqiang.skyai.rag.online.service.OnlineRetrievalService;
-import com.weiqiang.skyai.service.DocumentIngestionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -26,7 +25,6 @@ public class RagController {
 
 //    private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
     private final ChatClient.Builder gptChatClient;
-    private final DocumentIngestionService documentIngestionService;
     private final OnlineRetrievalService onlineRetrievalService;
 
 
@@ -58,15 +56,6 @@ public class RagController {
         return Map.of(
                 "question", question,
                 "answer", answer
-        );
-    }
-
-    @PostMapping("/ingest-demo")
-    public Map<String, Object> ingestDemoDocument() {
-        int documentCount = documentIngestionService.ingestDemoDocument();
-        return Map.of(
-                "status", "ok",
-                "documentsIngested", documentCount
         );
     }
 }

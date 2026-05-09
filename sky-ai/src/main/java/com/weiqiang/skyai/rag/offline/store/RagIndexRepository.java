@@ -16,23 +16,21 @@ import org.springframework.stereotype.Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
-import java.util.Optional;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.ArrayList;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Optional;
 
 @Slf4j
 @Repository
 @RequiredArgsConstructor
 public class RagIndexRepository implements KeywordChunkRepository {
 
-    private static final Pattern KEYWORD_PATTERN = Pattern.compile("[\\p{IsHan}A-Za-z0-9_\\-]+");
-
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final RagChunkSearchRepository ragChunkSearchRepository;
+    private final TsQueryFormatter tsQueryFormatter;
 
     @PostConstruct
     public void initializeSchema() {
@@ -76,6 +74,12 @@ public class RagIndexRepository implements KeywordChunkRepository {
                     content text not null,
                     metadata_json text not null,
                     vector_store_id varchar(64) not null,
+                    fts tsvector generated always as (
+                        to_tsvector(
+                                'simple',
+                                coalesce((metadata_json::jsonb ->> 'title'), '') || ' ' || coalesce(content, '')
+                        )
+                    ) stored,
                     created_at timestamptz not null default now(),
                     unique(document_id, index_version, chunk_index)
                 )
@@ -85,12 +89,21 @@ public class RagIndexRepository implements KeywordChunkRepository {
                 add column if not exists chunk_hash varchar(64)
                 """);
         jdbcTemplate.execute("""
+                alter table rag_chunk
+                add column if not exists fts tsvector generated always as (
+                    to_tsvector(
+                            'simple',
+                            coalesce((metadata_json::jsonb ->> 'title'), '') || ' ' || coalesce(content, '')
+                    )
+                ) stored
+                """);
+        jdbcTemplate.execute("""
                 create unique index if not exists ux_rag_chunk_chunk_hash
                 on rag_chunk(chunk_hash)
                 """);
         jdbcTemplate.execute("""
-                create index if not exists idx_rag_chunk_content_fts
-                on rag_chunk using gin (to_tsvector('simple', content))
+                create index if not exists idx_rag_chunk_fts
+                on rag_chunk using gin (fts)
                 """);
     }
 
@@ -156,10 +169,28 @@ public class RagIndexRepository implements KeywordChunkRepository {
 
     @Override
     public List<KeywordSearchResult> searchChunksByKeyword(String query, int topK) {
+        String queryTerms = tsQueryFormatter.format(query);
+        if (!queryTerms.isBlank()) {
+            List<KeywordSearchResult> ranked = ragChunkSearchRepository.searchByFts(queryTerms, topK).stream()
+                    .map(this::toKeywordSearchResult)
+                    .toList();
+            if (!ranked.isEmpty()) {
+                return ranked;
+            }
+        }
+        return searchChunksByKeywordLike(query, topK);
+    }
+
+    @Deprecated
+    public List<KeywordSearchResult> searchChunksByKeywordLike(String query, int topK) {
         List<KeywordSearchResult> ranked = jdbcTemplate.query("""
-                select content, metadata_json, ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', ?)) as score
+                select content, metadata_json, ts_rank(
+                    to_tsvector('simple', coalesce((metadata_json::jsonb ->> 'title'), '') || ' ' || content),
+                    plainto_tsquery('simple', ?)
+                ) as score
                 from rag_chunk
-                where to_tsvector('simple', content) @@ plainto_tsquery('simple', ?)
+                where to_tsvector('simple', coalesce((metadata_json::jsonb ->> 'title'), '') || ' ' || content)
+                    @@ plainto_tsquery('simple', ?)
                 order by score desc, created_at desc
                 limit ?
                 """, this::mapKeywordSearchResult, query, query, topK);
@@ -169,11 +200,13 @@ public class RagIndexRepository implements KeywordChunkRepository {
 
         List<String> keywords = extractKeywords(query);
         String whereClause = String.join(" or ", keywords.stream()
-                .map(ignored -> "content ilike ? escape '\\'")
+                .map(ignored -> "coalesce((metadata_json::jsonb ->> 'title'), '') ilike ? escape '\\' or content ilike ? escape '\\'")
                 .toList());
         List<Object> args = new ArrayList<>();
         for (String keyword : keywords) {
-            args.add("%" + escapeLike(keyword) + "%");
+            String escaped = "%" + escapeLike(keyword) + "%";
+            args.add(escaped);
+            args.add(escaped);
         }
         args.add(topK);
         return jdbcTemplate.query("""
@@ -222,6 +255,14 @@ public class RagIndexRepository implements KeywordChunkRepository {
         );
     }
 
+    private KeywordSearchResult toKeywordSearchResult(RagChunkSearchProjection projection) {
+        return new KeywordSearchResult(
+                projection.getContent(),
+                metadataFromJson(projection.getMetadataJson()),
+                projection.getScore() == null ? 0.0d : projection.getScore()
+        );
+    }
+
     private Map<String, Object> metadataFromJson(String metadataJson) {
         if (metadataJson == null || metadataJson.isBlank()) {
             return Map.of();
@@ -241,19 +282,7 @@ public class RagIndexRepository implements KeywordChunkRepository {
     }
 
     private List<String> extractKeywords(String query) {
-        List<String> keywords = new ArrayList<>();
-        Matcher matcher = KEYWORD_PATTERN.matcher(query);
-        while (matcher.find()) {
-            String keyword = matcher.group().trim();
-            if (!keyword.isBlank()) {
-                keywords.add(keyword);
-            }
-        }
-        if (keywords.isEmpty()) {
-            keywords.add(query);
-        }
-        log.info("提取关键词完成，query={}，keywords={}", query, keywords);
-        return keywords;
+        return tsQueryFormatter.extractKeywords(query);
     }
 
     private String metadataJson(EmbeddedRagChunk chunk) {
