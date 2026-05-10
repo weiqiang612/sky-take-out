@@ -1,22 +1,211 @@
-# Repository Guidelines
+# Memory module — food delivery customer service agent
 
-## Project Structure & Module Organization
-This repository is a single Spring Boot application built with Maven. Main application code lives in `src/main/java/com/weiqiang/skyai`, with controllers, services, config, and RAG-related code split into subpackages such as `controller`, `service`, `config`, and `rag/offline`. Test code lives in `src/test/java/com/weiqiang/skyai`, and sample or local-only assets are kept under `src/main/resources` alongside environment files like `application.yml`, `application-dev.yml`, `application-test.yml`, and `application-local.example.yml`.
+## Project context
 
-## Build, Test, and Development Commands
-- `mvn clean test` - compile the project and run the full test suite.
-- `mvn clean package -DskipTests` - produce the application JAR without running tests.
-- `mvn spring-boot:run` - start the application locally from the project root.
-- `mvn test -Dtest=OfflineIndexServiceTests` - run a focused test class when iterating on one component.
+Spring AI–based food delivery customer service agent. Two modules already exist and must not
+be modified: the RAG module and the intent recognition module. You are implementing the memory
+module that integrates with both.
 
-## Coding Style & Naming Conventions
-Use Java 17 and standard Spring conventions. Prefer `PascalCase` for classes, `camelCase` for methods and fields, and lowercase package names under `com.weiqiang.skyai`. Keep classes in the existing package boundaries instead of introducing new top-level layers. Lombok is enabled, so follow the surrounding style for annotations such as `@RequiredArgsConstructor` and `@Slf4j`. No repository-wide formatter or linter is configured, so match nearby code formatting and import order.
+**Existing enums — use these values exactly, do not redefine them:**
 
-## Testing Guidelines
-Tests use JUnit 5 through `spring-boot-starter-test`. Name test classes with the `*Tests` suffix, for example `SkyAiApplicationTests` or `ChunkingStrategyTests`. Prefer focused integration-style tests for controllers, document parsing, indexing, and other RAG workflows. Keep temporary test fixtures outside tracked resources unless they are meant to be reused.
+```java
+public enum IntentType {
+    ORDER_STATUS("order_status"),
+    CANCEL_ORDER("cancel_order"),
+    REQUEST_REFUND("request_refund"),
+    TRACK_DELIVERY("track_delivery"),
+    REPORT_MISSING_ITEM("report_missing_item"),
+    CHANGE_ADDRESS("change_address"),
+    FAQ("faq"),
+    ESCALATE_TO_HUMAN("escalate_to_human"),
+    OTHER("other");
+}
 
-## Commit & Pull Request Guidelines
-Git history uses short, imperative prefixes such as `feature:` and `feat:` followed by a brief description. Keep commits similarly specific and scoped. Pull requests should summarize the change, explain how it was verified, and note any config or API impact. Include sample payloads or screenshots only when they clarify behavior.
+public enum ConfidenceLevel {
+    HIGH("high"),
+    MEDIUM("medium"),
+    LOW("low");
+}
+```
 
-## Security & Configuration Tips
-Do not commit secrets or machine-specific values. Store environment-specific settings in `src/main/resources/application-dev.yml` or a local override based on `application-local.example.yml`. Review changes to database, AI provider, and vector-store configuration carefully before merging.
+**Existing record — read-only, do not modify:**
+
+```java
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record IntentRecognitionResult(
+        @JsonProperty("intent") IntentType intent,
+        @JsonProperty("confidence") ConfidenceLevel confidence,
+        @JsonProperty("entities") Map<String, String> entities,
+        @JsonProperty("possible_intents") List<IntentType> possibleIntents,
+        @JsonProperty("clarification_question") @Nullable String clarificationQuestion,
+        @JsonProperty("requires_human_confirmation") boolean requiresHumanConfirmation,
+        @JsonProperty("human_confirmation_reason") @Nullable String humanConfirmationReason
+) {}
+```
+
+**Three-layer memory architecture:**
+
+| Layer | Implementation | Storage | Scope |
+|---|---|---|---|
+| Working | `MessageChatMemoryAdvisor` | In-context | Current turn (last 20 msgs) |
+| Session | `RedisChatMemoryRepository` | Redis TTL 2h | Cross-reload, same user |
+| Long-term | `UserMemory` JPA entity | PostgreSQL | Persistent across sessions |
+
+**Fixed advisor chain order:**
+
+```
+IntentRecognitionAdvisor
+        ↓  (writes "intentResult" to advisorContext)
+UserContextAdvisor
+        ↓  (reads "intentResult", injects memory into system prompt)
+MessageChatMemoryAdvisor
+        ↓
+QuestionAnswerAdvisor   ← existing RAG module, do not modify
+        ↓
+ChatClient
+```
+
+`advisorContext` is the shared mutable map (`Map<String, Object>`) passed through the chain.
+
+---
+
+## Coding rules
+
+### 1. Think before coding
+
+Before writing any code for a task, output a short reasoning block:
+
+- State your interpretation of the task. If ambiguous, list interpretations and stop — do not
+  pick one silently.
+- List assumptions about existing code or interfaces that you cannot verify from files in the
+  repo. Flag each one explicitly.
+- If a simpler solution exists, name it. Recommend it even if it reduces scope.
+- If anything is unclear, output: `BLOCKED: <what is unclear>` and stop.
+
+### 2. Simplicity first
+
+Produce the minimum code that satisfies the requirement. Then stop.
+
+- No additional methods, fields, or classes beyond what the task requires.
+- No abstraction for logic used in only one place.
+- No optional configurability that was not requested.
+- No defensive error handling for states that the existing code makes impossible.
+- Hard limit: if a class exceeds 80 lines, justify each block or shorten it before committing.
+
+### 3. Surgical changes
+
+- Edit only the files the task requires.
+- Do not reformat, rename, or reorganise anything outside the lines you are changing.
+- Match existing code style in every file: indentation, naming, annotation style, import order.
+- If you introduce a new import, variable, or method that your own changes then make unused,
+  remove it. Do not remove pre-existing unused code.
+- If you spot unrelated dead code, note it in your reasoning block. Do not touch it.
+
+### 4. Goal-driven execution
+
+For any task with more than one step, begin with a plan:
+
+```
+1. [action] → verify: [concrete check]
+2. [action] → verify: [concrete check]
+```
+
+Verification must be runnable. Prefer: "run `./mvnw test -pl memory -Dtest=ClassName`
+and confirm zero failures" over "check it works". Do not advance to the next step until
+the current step's verify condition passes.
+
+---
+
+## Environment
+
+- Build tool: Maven (`./mvnw`). Do not use Gradle commands.
+- Java 17. Use records, sealed interfaces, and switch expressions where appropriate.
+- Run tests with: `./mvnw test -pl <module> -Dtest=<TestClass>`
+- Run all tests: `./mvnw verify`
+- Do not start the application to verify behaviour — use unit or integration tests only.
+- Redis and PostgreSQL are available as Docker services. Connection details are in
+  `src/test/resources/application-test.yml`. Use `@SpringBootTest` with the `test` profile
+  for integration tests.
+- Do not commit secrets. Use environment variable placeholders: `${REDIS_HOST}`,
+  `${DB_PASSWORD}`, etc.
+
+---
+
+## Memory module — design constraints
+
+### `IntentRecognitionAdvisor` (implements `CallAroundAdvisor`)
+
+- Before classification, fetch from Redis: last 4 messages for the current `conversationId`.
+- Before classification, fetch from `UserMemory`: `knownIssues` summary for the current
+  `userId` (one sentence max when injected into the prompt).
+- Pre-populate known entities into the classification prompt. If session memory contains an
+  active `order_id`, include it so the LLM confirms rather than re-extracts.
+- After classification, write `IntentRecognitionResult` into `advisorContext` under key
+  `"intentResult"`.
+- When `confidence == LOW`: pass only the raw user message to the classifier — no session
+  context, no user history. The clarification question in the result handles disambiguation.
+- When `confidence` is `MEDIUM` or `HIGH`: include session context and user history summary.
+
+### `UserContextAdvisor` (implements `CallAroundAdvisor`)
+
+- Read `advisorContext.get("intentResult")`. If null, treat as `OTHER` / `LOW`.
+- Switch on `IntentType`. Fetch only what is listed below — nothing more:
+
+  | Intent | Fetch |
+  |---|---|
+  | `ORDER_STATUS`, `TRACK_DELIVERY` | Order by `entities.get("order_id")`; fall back to last 3 orders |
+  | `CANCEL_ORDER`, `REQUEST_REFUND` | Order by `entities.get("order_id")` (required); `knownIssues` from `UserMemory` |
+  | `REPORT_MISSING_ITEM` | Order by `entities.get("order_id")`; item list from that order |
+  | `CHANGE_ADDRESS` | `defaultAddress` from `UserMemory` only |
+  | `ESCALATE_TO_HUMAN` | Last 3 orders + full `knownIssues` block |
+  | `FAQ` | `dietaryPrefs` from `UserMemory` only |
+  | `OTHER` + `LOW` | Nothing — return empty string |
+  | `OTHER` + `MEDIUM` or `HIGH` | `defaultAddress` from `UserMemory` only |
+
+- Prepend the assembled block to the system prompt via `AdvisedRequest.from(request).systemText(...)`.
+- Context block hard limit: 5 sentences. Summarise — do not dump raw JSON or field lists.
+
+### `RedisChatMemoryRepository` (implements `ChatMemoryRepository`)
+
+- Key: `chat:{conversationId}` (string).
+- Value: JSON array of `Message` objects, serialised with Jackson.
+- TTL: 2 hours. Reset the TTL on every `saveAll` call.
+- `findByConversationId` returns an empty list (not null) for unknown keys.
+
+### Memory writer
+
+- Class annotated `@Service`. Method annotated `@Async`.
+- Called after every turn from outside the advisor chain (do not embed inside an advisor).
+- Guard condition — check `requiresHumanConfirmation` first:
+  - `true` → write the updated message list to Redis only. Return immediately.
+  - `false` → call LLM extraction prompt, parse result, merge into `UserMemory`, save.
+- LLM extraction prompt must instruct the model to return JSON only (no markdown, no
+  preamble). Strip any ` ```json ` fences before parsing as a safety measure.
+- Skip the long-term write entirely if the session contained only `FAQ` or `OTHER` intents
+  at `LOW` confidence. Log the skip at `DEBUG` level.
+- Log extracted facts at `DEBUG` level. Do not log PII at `INFO` or above.
+
+### `UserMemory` (JPA entity)
+
+Required fields only — do not add columns without being asked:
+
+```
+userId          String   @Column(unique = true, nullable = false)
+dietaryPrefs    String   @Column(nullable = true)
+defaultAddress  String   @Column(nullable = true)
+knownIssues     String   @Column(nullable = true)   // free-text summary, max 500 chars
+updatedAt       Instant  @Column(nullable = false)
+```
+
+Use `@Column(length = 500)` on `knownIssues`. No other length constraints unless specified.
+
+### What NOT to build
+
+Do not build any of the following unless explicitly asked in a follow-up task:
+
+- A cache in front of PostgreSQL reads.
+- An audit log or event-sourced history for memory changes.
+- Admin or debug HTTP endpoints for memory inspection or clearing.
+- Versioned preference history.
+- Sub-type classification of `FAQ` or `OTHER` intents in Java code.
+- A custom `IntentType` wrapper or adapter — use the enum directly in switch expressions.

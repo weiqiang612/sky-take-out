@@ -2,6 +2,7 @@ package com.weiqiang.skyai.intent_recognition.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.springframework.lang.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -12,8 +13,8 @@ public record IntentRecognitionResult(
         @JsonProperty("confidence") ConfidenceLevel confidence,
         @JsonProperty("entities") Map<String, String> entities,
         @JsonProperty("possible_intents") List<IntentType> possibleIntents,
-        @JsonProperty("clarification_question") String clarificationQuestion,
+        @JsonProperty("clarification_question") @Nullable String clarificationQuestion,
         @JsonProperty("requires_human_confirmation") boolean requiresHumanConfirmation,
-        @JsonProperty("human_confirmation_reason") String humanConfirmationReason
+        @JsonProperty("human_confirmation_reason") @Nullable String humanConfirmationReason
 ) {
 }
