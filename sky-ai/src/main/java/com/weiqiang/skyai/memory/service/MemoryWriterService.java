@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -52,6 +53,9 @@ public class MemoryWriterService {
         if (intentResult != null && intentResult.requiresHumanConfirmation()) {
             return;
         }
+        if (persistToolOutcomes(userId, messages, intentResult)) {
+            return;
+        }
         // 对于 FAQ 和 OTHER 意图，如果置信度较低，也不写入长期记忆，避免误写入
         if (intentResult == null || shouldSkipLongTermWrite(intentResult)) {
             log.debug("skip long-term memory write for userId={}, intent={}, confidence={}", userId,
@@ -82,6 +86,33 @@ public class MemoryWriterService {
     private boolean shouldSkipLongTermWrite(IntentRecognitionResult intentResult) {
         return (intentResult.intent() == IntentType.FAQ || intentResult.intent() == IntentType.OTHER)
                 && intentResult.confidence() == ConfidenceLevel.LOW;
+    }
+
+    private boolean persistToolOutcomes(String userId, List<Message> messages, IntentRecognitionResult intentResult) {
+        if (intentResult == null) {
+            return false;
+        }
+        boolean persisted = false;
+        for (Message message : messages) {
+            if (message instanceof ToolResponseMessage toolMessage) {
+                for (ToolResponseMessage.ToolResponse response : toolMessage.getResponses()) {
+                    persisted |= persistToolOutcome(userId, intentResult.intent(), response.name(), response.responseData());
+                }
+            }
+        }
+        return persisted;
+    }
+
+    private boolean persistToolOutcome(String userId, IntentType intent, String toolName, String responseData) {
+        if (!StringUtils.hasText(responseData) || responseData.startsWith("FAIL:")) return false;
+        UserMemory userMemory = userMemoryRepository.findById(userId).orElseGet(UserMemory::new);
+        userMemory.setUserId(userId);
+        if (intent == IntentType.CANCEL_ORDER || intent == IntentType.REQUEST_REFUND) userMemory.setKnownIssues(limit(userMemory.getKnownIssues(), responseData));
+        else if ((intent == IntentType.CHANGE_ADDRESS || intent == IntentType.ADDRESS_MANAGEMENT) && toolName.toLowerCase().contains("address")) userMemory.setDefaultAddress(responseData);
+        else return false;
+        userMemory.setUpdatedAt(Instant.now());
+        userMemoryRepository.save(userMemory);
+        return true;
     }
 
     // 构建对话转录文本，格式为 "SENDER: message text"，每条消息占一行

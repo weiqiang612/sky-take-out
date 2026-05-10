@@ -629,7 +629,7 @@ public class OrdersServiceImpl implements OrdersService {
     }
 
     /**
-     * 瀹㈡埛鍌崟
+     * 来单提醒
      * @param id
      */
     @Override
@@ -643,6 +643,40 @@ public class OrdersServiceImpl implements OrdersService {
             jsonObject.put("orderId", id);
             jsonObject.put("content", "订单号：" + order.getNumber());
             webSocketServer.sendToAllClient(jsonObject.toJSONString());
+    }
+
+
+    @Override
+    public void requestRefund(Long id, String reason) {
+        Orders order = ordersMapper.getById(id);
+        if (order == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+        if (!Orders.PAID.equals(order.getPayStatus())) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_PAID);
+        }
+        ordersMapper.update(Orders.builder()
+                .id(id)
+                .payStatus(Orders.REFUND)
+                .cancelReason(reason)
+                .version(order.getVersion())
+                .build());
+    }
+
+    @Override
+    public void updateDeliveryAddress(Long id, String newAddress) {
+        Orders order = ordersMapper.getById(id);
+        if (order == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+        if (Orders.CANCELLED.equals(order.getStatus()) || Orders.COMPLETED.equals(order.getStatus())) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+        ordersMapper.update(Orders.builder()
+                .id(id)
+                .address(newAddress)
+                .version(order.getVersion())
+                .build());
     }
 
     /**

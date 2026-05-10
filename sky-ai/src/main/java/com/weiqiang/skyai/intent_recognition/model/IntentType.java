@@ -10,6 +10,10 @@ public enum IntentType {
     TRACK_DELIVERY("track_delivery"),
     REPORT_MISSING_ITEM("report_missing_item"),
     CHANGE_ADDRESS("change_address"),
+    MENU_QUERY("menu_query"),
+    CART_MANAGEMENT("cart_management"),
+    ADDRESS_MANAGEMENT("address_management"),
+    SHOP_STATUS("shop_status"),
     FAQ("faq"),
     ESCALATE_TO_HUMAN("escalate_to_human"),
     OTHER("other");

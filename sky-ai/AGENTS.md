@@ -1,4 +1,4 @@
-# Memory module — food delivery customer service agent
+# Memory, tool calling, and MCP — food delivery customer service agent
 
 ## Project context
 
@@ -57,10 +57,12 @@ public record IntentRecognitionResult(
 IntentRecognitionAdvisor
         ↓  (writes "intentResult" to advisorContext)
 UserContextAdvisor
-        ↓  (reads "intentResult", injects memory into system prompt)
+        ↓  (reads "intentResult", injects memory + sets "allowedTools")
 MessageChatMemoryAdvisor
         ↓
 QuestionAnswerAdvisor   ← existing RAG module, do not modify
+        ↓
+ToolFilterAdvisor       ← reads "allowedTools", scopes tool visibility
         ↓
 ChatClient
 ```
@@ -209,3 +211,106 @@ Do not build any of the following unless explicitly asked in a follow-up task:
 - Versioned preference history.
 - Sub-type classification of `FAQ` or `OTHER` intents in Java code.
 - A custom `IntentType` wrapper or adapter — use the enum directly in switch expressions.
+
+---
+
+## Tool calling and MCP — design constraints
+
+### `OrderTools` (`@Tool` methods)
+
+Single `@Component`. Expose exactly these three tools:
+
+| Method | Arguments | Delegates to |
+|---|---|---|
+| `cancelOrder` | `String orderId` | `OrderService.cancel(orderId)` |
+| `requestRefund` | `String orderId, String reason` | `RefundService.issue(orderId, reason)` |
+| `updateDeliveryAddress` | `String orderId, String newAddress` | `OrderService.updateAddress(orderId, newAddress)` |
+
+Each method annotated `@Tool(description = "...")`. Description must be one sentence,
+specific enough that the LLM can select the correct tool without ambiguity. Do not add
+parameter validation beyond null-checks.
+
+Register on `ChatClient` via `.defaultTools(orderTools)`. Not inline, not as lambdas.
+
+### `ToolFilterAdvisor` (implements `CallAroundAdvisor`)
+
+Sits immediately before `ChatClient`. Reads `allowedTools` (`Set<String>`) from
+`advisorContext`. If absent, passes an empty set — the LLM sees no tools.
+
+Intent-to-tools mapping (set by `UserContextAdvisor`, read here):
+
+```
+CANCEL_ORDER        → {"cancelOrder"}
+REQUEST_REFUND      → {"requestRefund"}
+CHANGE_ADDRESS      → {"updateDeliveryAddress"}
+all other intents   → {} (empty)
+```
+
+`ToolFilterAdvisor` must contain no intent logic — it only reads `allowedTools` and
+applies it. Intent routing lives in `UserContextAdvisor`.
+
+### MCP server integration
+
+Declare in `application.yml` only. No Java configuration required:
+
+```yaml
+spring:
+  ai:
+    mcp:
+      client:
+        servers:
+          maps-server:
+            url: ${MCP_MAPS_URL}
+          payments-server:
+            url: ${MCP_PAYMENTS_URL}
+          notifications-server:
+            url: ${MCP_NOTIFICATIONS_URL}
+```
+
+Spring AI auto-discovers tool schemas at startup. MCP tools behave identically to local
+`@Tool` methods from `ChatClient`'s perspective.
+
+Add MCP tool names to the `allowedTools` sets in `UserContextAdvisor` if they need
+intent-gating. `FAQ` and `OTHER` must never expose payment, cancellation, or notification
+tools.
+
+All MCP URLs must use environment variable placeholders — no hardcoded hostnames.
+
+### Memory writer — tool outcome persistence
+
+After the existing `requiresHumanConfirmation` gate, scan messages for
+`ToolResponseMessage` instances and call `persistToolOutcome` for each:
+
+| Intent | Persistence action |
+|---|---|
+| `CANCEL_ORDER` | Append `"Cancelled order {id} on {date}"` to `knownIssues` |
+| `REQUEST_REFUND` | Append `"Refund issued for order {id}: {reason}"` to `knownIssues` |
+| `CHANGE_ADDRESS` | Overwrite `defaultAddress` directly — no LLM extraction |
+
+`persistToolOutcome` must be private and under 20 lines. Do not call the LLM for tool
+outcome persistence — the tool response string contains all required facts.
+
+Skip persistence if the tool response string indicates a failure. Ask what the standard
+error strings from `OrderService` and `RefundService` look like before implementing if
+they are not visible in the repo.
+
+### Verification steps for new modules
+
+```
+1. Implement OrderTools         → verify: unit test confirms each @Tool method delegates
+                                           to the correct service and returns a string
+2. Implement ToolFilterAdvisor  → verify: unit test confirms empty set = no tools in
+                                           AdvisedRequest; correct set = tool names present
+3. Wire MCP in application.yml  → verify: integration test confirms tool names from each
+                                           MCP server appear in ChatClient tool registry
+4. Update memory writer         → verify: unit test with a mock ToolResponseMessage confirms
+                                           knownIssues / defaultAddress updated correctly;
+                                           failed tool responses produce no write
+```
+
+### What NOT to build unless explicitly asked
+
+- No retry logic around tool calls — Spring AI handles this at the framework level.
+- No tool call audit log separate from the existing memory writer.
+- No MCP tool schema validation in Java — trust the server's schema at startup.
+- No fallback tool implementations for when an MCP server is unavailable.

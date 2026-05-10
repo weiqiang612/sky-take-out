@@ -5,9 +5,22 @@ spring:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   flyway:
     baseline-on-migrate: true
+  ai:
+    mcp:
+      client:
+        sse:
+          connections:
+            maps-server:
+              url: ${MCP_MAPS_URL:}
+            payments-server:
+              url: ${MCP_PAYMENTS_URL:}
+            notifications-server:
+              url: ${MCP_NOTIFICATIONS_URL:}
 server:
   port: ${SERVER_PORT:8081}
 skyai:
+  sky-server:
+    base-url: ${SKY_SERVER_BASE_URL:http://localhost:8080}
   retrieval:
     online:
       top-k: ${SKY_AI_RETRIEVAL_TOP_K:80}

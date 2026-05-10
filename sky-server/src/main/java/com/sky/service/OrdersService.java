@@ -112,4 +112,8 @@ public interface OrdersService {
      * @param id
      */
     void reminder(Long id);
+
+    void requestRefund(Long id, String reason);
+
+    void updateDeliveryAddress(Long id, String newAddress);
 }

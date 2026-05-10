@@ -17,8 +17,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Advisor for injecting user context into the prompt based on recognized intents and user memory.
@@ -35,6 +37,7 @@ public class UserContextAdvisor implements CallAdvisor {
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
         IntentRecognitionResult intentResult = (IntentRecognitionResult) chatClientRequest.context().get("intentResult");
+        chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
         String userId = stringParam(chatClientRequest, "userId");
         String contextBlock = buildContextBlock(intentResult, userId);
         if (!StringUtils.hasText(contextBlock)) {
@@ -70,6 +73,7 @@ public class UserContextAdvisor implements CallAdvisor {
             case CANCEL_ORDER, REQUEST_REFUND -> sentence("Known issues: " + memoryValue(userMemory, UserMemory::getKnownIssues));
             case REPORT_MISSING_ITEM -> sentence("Order id: " + referencedOrderId(intentResult));
             case CHANGE_ADDRESS -> sentence("Default address: " + memoryValue(userMemory, UserMemory::getDefaultAddress));
+            case MENU_QUERY, CART_MANAGEMENT, ADDRESS_MANAGEMENT, SHOP_STATUS -> "";
             case ESCALATE_TO_HUMAN -> joinSentences(List.of(
                     sentence("Order id: " + referencedOrderId(intentResult)),
                     sentence("Known issues: " + memoryValue(userMemory, UserMemory::getKnownIssues))
@@ -77,6 +81,28 @@ public class UserContextAdvisor implements CallAdvisor {
             case FAQ -> sentence("Dietary preferences: " + memoryValue(userMemory, UserMemory::getDietaryPrefs));
             case OTHER -> sentence("Default address: " + memoryValue(userMemory, UserMemory::getDefaultAddress));
         };
+    }
+
+    private Set<String> allowedTools(IntentRecognitionResult intentResult) {
+        if (intentResult == null) {
+            return Set.of();
+        }
+        return switch (intentResult.intent()) {
+            case ORDER_STATUS, TRACK_DELIVERY -> setOf("getOrderDetail", "listRecentOrders", "remindOrder");
+            case CANCEL_ORDER -> setOf("cancelOrder");
+            case REQUEST_REFUND -> setOf("requestRefund");
+            case CHANGE_ADDRESS -> setOf("updateDeliveryAddress");
+            case REPORT_MISSING_ITEM -> setOf("getOrderDetail", "requestRefund");
+            case MENU_QUERY -> setOf("listCategories", "listDishesByCategory", "listSetmealsByCategory", "listSetmealDishes", "getShopStatus");
+            case CART_MANAGEMENT -> setOf("listCart", "addDishToCart", "addSetmealToCart", "removeCartItem", "cleanCart");
+            case ADDRESS_MANAGEMENT -> setOf("listAddresses", "getDefaultAddress", "setDefaultAddress", "updateAddress");
+            case SHOP_STATUS -> setOf("getShopStatus");
+            case FAQ, ESCALATE_TO_HUMAN, OTHER -> Set.of();
+        };
+    }
+
+    private Set<String> setOf(String... tools) {
+        return new LinkedHashSet<>(List.of(tools));
     }
 
     private String referencedOrderId(IntentRecognitionResult intentResult) {
