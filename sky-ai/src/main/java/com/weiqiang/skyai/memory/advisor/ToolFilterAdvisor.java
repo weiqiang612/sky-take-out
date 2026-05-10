@@ -19,7 +19,7 @@ public class ToolFilterAdvisor implements CallAdvisor {
 
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
-        Set<String> allowedTools = allowedTools(chatClientRequest);
+        Set<String> allowedTools = ToolPolicyRegistry.mergeAllowedTools(allowedTools(chatClientRequest));
         ChatOptions options = chatClientRequest.prompt().getOptions();
         ToolCallingChatOptions toolOptions = options instanceof ToolCallingChatOptions existing
                 ? existing.copy()

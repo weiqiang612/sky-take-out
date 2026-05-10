@@ -73,7 +73,21 @@ public class UserContextAdvisor implements CallAdvisor {
             case CANCEL_ORDER, REQUEST_REFUND -> sentence("Known issues: " + memoryValue(userMemory, UserMemory::getKnownIssues));
             case REPORT_MISSING_ITEM -> sentence("Order id: " + referencedOrderId(intentResult));
             case CHANGE_ADDRESS -> sentence("Default address: " + memoryValue(userMemory, UserMemory::getDefaultAddress));
-            case MENU_QUERY, CART_MANAGEMENT, ADDRESS_MANAGEMENT, SHOP_STATUS -> "";
+            case MENU_QUERY -> joinSentences(List.of(
+                    sentence("If the user names a dish or setmeal, search the menu first and then act on the unique match directly."),
+                    sentence("Do not ask the user to provide an id when search tools can resolve it.")
+            ));
+            case CART_MANAGEMENT -> joinSentences(List.of(
+                    sentence("The current user may manage their own cart directly."),
+                    sentence("If the user names a dish or setmeal, search the menu first and then add the unique match directly."),
+                    sentence("Do not ask for menu access, do not ask the user to provide an id when search tools can resolve it.")
+            ));
+            case ADDRESS_MANAGEMENT -> joinSentences(List.of(
+                    sentence("The current user may manage their own saved addresses directly."),
+                    sentence("If the user names an address by consignee, phone, label, or detail, search addresses first and then act on the unique match directly."),
+                    sentence("Do not ask the user to provide an id when search tools can resolve it.")
+            ));
+            case SHOP_STATUS -> sentence("You may check the shop status directly.");
             case ESCALATE_TO_HUMAN -> joinSentences(List.of(
                     sentence("Order id: " + referencedOrderId(intentResult)),
                     sentence("Known issues: " + memoryValue(userMemory, UserMemory::getKnownIssues))
@@ -88,14 +102,14 @@ public class UserContextAdvisor implements CallAdvisor {
             return Set.of();
         }
         return switch (intentResult.intent()) {
-            case ORDER_STATUS, TRACK_DELIVERY -> setOf("getOrderDetail", "listRecentOrders", "remindOrder");
-            case CANCEL_ORDER -> setOf("cancelOrder");
-            case REQUEST_REFUND -> setOf("requestRefund");
-            case CHANGE_ADDRESS -> setOf("updateDeliveryAddress");
-            case REPORT_MISSING_ITEM -> setOf("getOrderDetail", "requestRefund");
-            case MENU_QUERY -> setOf("listCategories", "listDishesByCategory", "listSetmealsByCategory", "listSetmealDishes", "getShopStatus");
-            case CART_MANAGEMENT -> setOf("listCart", "addDishToCart", "addSetmealToCart", "removeCartItem", "cleanCart");
-            case ADDRESS_MANAGEMENT -> setOf("listAddresses", "getDefaultAddress", "setDefaultAddress", "updateAddress");
+            case ORDER_STATUS, TRACK_DELIVERY -> setOf("searchOrders", "getOrderDetail", "listRecentOrders", "remindOrder");
+            case CANCEL_ORDER -> setOf("searchOrders", "cancelOrder");
+            case REQUEST_REFUND -> setOf("searchOrders", "requestRefund");
+            case CHANGE_ADDRESS -> setOf("searchOrders", "searchAddresses", "updateDeliveryAddress");
+            case REPORT_MISSING_ITEM -> setOf("searchOrders", "getOrderDetail", "requestRefund");
+            case MENU_QUERY -> setOf("searchDishes", "searchSetmeals", "listCategories", "listDishesByCategory", "listSetmealsByCategory", "listSetmealDishes", "getShopStatus");
+            case CART_MANAGEMENT -> setOf("searchDishes", "searchSetmeals", "searchCartItems", "listCart", "addDishToCart", "addSetmealToCart", "removeCartItem", "cleanCart");
+            case ADDRESS_MANAGEMENT -> setOf("searchAddresses", "listAddresses", "getDefaultAddress", "setDefaultAddress", "updateAddress");
             case SHOP_STATUS -> setOf("getShopStatus");
             case FAQ, ESCALATE_TO_HUMAN, OTHER -> Set.of();
         };

@@ -107,8 +107,10 @@ public class MemoryWriterService {
         if (!StringUtils.hasText(responseData) || responseData.startsWith("FAIL:")) return false;
         UserMemory userMemory = userMemoryRepository.findById(userId).orElseGet(UserMemory::new);
         userMemory.setUserId(userId);
-        if (intent == IntentType.CANCEL_ORDER || intent == IntentType.REQUEST_REFUND) userMemory.setKnownIssues(limit(userMemory.getKnownIssues(), responseData));
-        else if ((intent == IntentType.CHANGE_ADDRESS || intent == IntentType.ADDRESS_MANAGEMENT) && toolName.toLowerCase().contains("address")) userMemory.setDefaultAddress(responseData);
+        if (intent == IntentType.CANCEL_ORDER || intent == IntentType.REQUEST_REFUND)
+            userMemory.setKnownIssues(limit(userMemory.getKnownIssues(), responseData));
+        else if ((intent == IntentType.CHANGE_ADDRESS || intent == IntentType.ADDRESS_MANAGEMENT) && toolName.toLowerCase().contains("address"))
+            userMemory.setDefaultAddress(responseData);
         else return false;
         userMemory.setUpdatedAt(Instant.now());
         userMemoryRepository.save(userMemory);
@@ -135,9 +137,24 @@ public class MemoryWriterService {
     }
 
     private MemoryExtraction parse(String content) {
+        if (content == null || content.isBlank()) {
+            return new MemoryExtraction("", "", "");
+        }
+
         try {
-            return objectMapper.readValue(content, MemoryExtraction.class);
+            // 健壮性处理：提取 JSON 部分，忽略前后的废话
+            String jsonMatch = content;
+            int firstBrace = content.indexOf("{");
+            int lastBrace = content.lastIndexOf("}");
+
+            if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+                jsonMatch = content.substring(firstBrace, lastBrace + 1);
+            }
+
+            return objectMapper.readValue(jsonMatch, MemoryExtraction.class);
         } catch (Exception ex) {
+            // 打印出导致失败的原始内容，方便排查
+            log.error("JSON 解析失败，原始响应内容为: \n{}", content);
             throw new IllegalStateException("Failed to parse memory extraction", ex);
         }
     }

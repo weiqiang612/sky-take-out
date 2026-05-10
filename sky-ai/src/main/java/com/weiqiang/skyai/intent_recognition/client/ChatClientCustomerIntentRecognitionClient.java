@@ -44,6 +44,10 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
             - track_delivery
             - report_missing_item
             - change_address
+            - menu_query
+            - cart_management
+            - address_management
+            - shop_status
             - faq
             - escalate_to_human
             - other
