@@ -3,8 +3,7 @@ package com.weiqiang.skyai.memory.advisor;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
-import com.weiqiang.skyai.memory.model.UserMemory;
-import com.weiqiang.skyai.memory.repository.UserMemoryRepository;
+import com.weiqiang.skyai.memory.service.UserMemoryFactService;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
@@ -28,10 +27,10 @@ import java.util.Set;
 @Component
 public class UserContextAdvisor implements CallAdvisor {
 
-    private final UserMemoryRepository userMemoryRepository;
+    private final UserMemoryFactService userMemoryFactService;
 
-    public UserContextAdvisor(UserMemoryRepository userMemoryRepository) {
-        this.userMemoryRepository = userMemoryRepository;
+    public UserContextAdvisor(UserMemoryFactService userMemoryFactService) {
+        this.userMemoryFactService = userMemoryFactService;
     }
 
     @Override
@@ -67,33 +66,35 @@ public class UserContextAdvisor implements CallAdvisor {
         if (intentResult.intent() == IntentType.OTHER && intentResult.confidence() == ConfidenceLevel.LOW) {
             return "";
         }
-        UserMemory userMemory = StringUtils.hasText(userId) ? userMemoryRepository.findById(userId).orElse(null) : null;
         return switch (intentResult.intent()) {
-            case ORDER_STATUS, TRACK_DELIVERY -> sentence("Order id: " + referencedOrderId(intentResult));
-            case CANCEL_ORDER, REQUEST_REFUND -> sentence("Known issues: " + memoryValue(userMemory, UserMemory::getKnownIssues));
-            case REPORT_MISSING_ITEM -> sentence("Order id: " + referencedOrderId(intentResult));
-            case CHANGE_ADDRESS -> sentence("Default address: " + memoryValue(userMemory, UserMemory::getDefaultAddress));
+            case ORDER_STATUS, TRACK_DELIVERY -> memorySentence("Order id", referencedOrderId(intentResult));
+            case CANCEL_ORDER, REQUEST_REFUND -> memorySentence("Known issues", userMemoryFactService.operationalNotesSummary(userId));
+            case REPORT_MISSING_ITEM -> memorySentence("Order id", referencedOrderId(intentResult));
+            case CHANGE_ADDRESS -> memorySentence("Default address", userMemoryFactService.defaultAddressSummary(userId));
             case MENU_QUERY -> joinSentences(List.of(
+                    memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId)),
                     sentence("If the user names a dish or setmeal, search the menu first and then act on the unique match directly."),
                     sentence("Do not ask the user to provide an id when search tools can resolve it.")
             ));
             case CART_MANAGEMENT -> joinSentences(List.of(
+                    memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId)),
                     sentence("The current user may manage their own cart directly."),
                     sentence("If the user names a dish or setmeal, search the menu first and then add the unique match directly."),
                     sentence("Do not ask for menu access, do not ask the user to provide an id when search tools can resolve it.")
             ));
             case ADDRESS_MANAGEMENT -> joinSentences(List.of(
+                    memorySentence("Default address", userMemoryFactService.defaultAddressSummary(userId)),
                     sentence("The current user may manage their own saved addresses directly."),
                     sentence("If the user names an address by consignee, phone, label, or detail, search addresses first and then act on the unique match directly."),
                     sentence("Do not ask the user to provide an id when search tools can resolve it.")
             ));
             case SHOP_STATUS -> sentence("You may check the shop status directly.");
             case ESCALATE_TO_HUMAN -> joinSentences(List.of(
-                    sentence("Order id: " + referencedOrderId(intentResult)),
-                    sentence("Known issues: " + memoryValue(userMemory, UserMemory::getKnownIssues))
+                    memorySentence("Order id", referencedOrderId(intentResult)),
+                    memorySentence("Known issues", userMemoryFactService.operationalNotesDetailed(userId))
             ));
-            case FAQ -> sentence("Dietary preferences: " + memoryValue(userMemory, UserMemory::getDietaryPrefs));
-            case OTHER -> sentence("Default address: " + memoryValue(userMemory, UserMemory::getDefaultAddress));
+            case FAQ -> memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId));
+            case OTHER -> memorySentence("Default address", userMemoryFactService.defaultAddressSummary(userId));
         };
     }
 
@@ -124,14 +125,6 @@ public class UserContextAdvisor implements CallAdvisor {
         return StringUtils.hasText(orderId) ? orderId : "unavailable";
     }
 
-    private String memoryValue(UserMemory userMemory, java.util.function.Function<UserMemory, String> extractor) {
-        if (userMemory == null) {
-            return "unavailable";
-        }
-        String value = extractor.apply(userMemory);
-        return StringUtils.hasText(value) ? oneSentence(value) : "unavailable";
-    }
-
     private String joinSentences(List<String> parts) {
         return parts.stream().filter(StringUtils::hasText).limit(5).reduce((left, right) -> left + " " + right).orElse("");
     }
@@ -141,9 +134,8 @@ public class UserContextAdvisor implements CallAdvisor {
         return value.endsWith(".") ? value : value + ".";
     }
 
-    private String oneSentence(String text) {
-        int end = text.indexOf('.');
-        return end >= 0 ? text.substring(0, end + 1).trim() : text.trim();
+    private String memorySentence(String label, String value) {
+        return sentence(label + ": " + (StringUtils.hasText(value) ? value.trim() : "unavailable"));
     }
 
     private String stringParam(ChatClientRequest request, String key) {

@@ -26,7 +26,7 @@ spring:
       api-key: ${OPENAI_API_KEY:temp_key}
       chat:
         options:
-          model: ${OPENAI_CHAT_MODEL:gpt-5-mini}
+          model: ${OPENAI_CHAT_MODEL:gpt-4o}
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
       embedding:

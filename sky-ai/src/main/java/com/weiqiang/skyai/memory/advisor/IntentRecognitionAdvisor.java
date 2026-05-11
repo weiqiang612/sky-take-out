@@ -5,9 +5,8 @@ import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionRequest;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
-import com.weiqiang.skyai.memory.model.UserMemory;
 import com.weiqiang.skyai.memory.repository.RedisChatMemoryRepository;
-import com.weiqiang.skyai.memory.repository.UserMemoryRepository;
+import com.weiqiang.skyai.memory.service.UserMemoryFactService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -37,14 +36,14 @@ public class IntentRecognitionAdvisor implements CallAdvisor {
 
     private final CustomerIntentRecognitionClient customerIntentRecognitionClient;
     private final RedisChatMemoryRepository redisChatMemoryRepository;
-    private final UserMemoryRepository userMemoryRepository;
+    private final UserMemoryFactService userMemoryFactService;
 
     public IntentRecognitionAdvisor(CustomerIntentRecognitionClient customerIntentRecognitionClient,
                                     RedisChatMemoryRepository redisChatMemoryRepository,
-                                    UserMemoryRepository userMemoryRepository) {
+                                    UserMemoryFactService userMemoryFactService) {
         this.customerIntentRecognitionClient = customerIntentRecognitionClient;
         this.redisChatMemoryRepository = redisChatMemoryRepository;
-        this.userMemoryRepository = userMemoryRepository;
+        this.userMemoryFactService = userMemoryFactService;
     }
 
     @Override
@@ -89,9 +88,9 @@ public class IntentRecognitionAdvisor implements CallAdvisor {
             history.add("Known order id: " + orderId);
         }
         if (StringUtils.hasText(userId)) {
-            UserMemory userMemory = userMemoryRepository.findById(userId).orElse(null);
-            if (userMemory != null && StringUtils.hasText(userMemory.getKnownIssues())) {
-                history.add("Known issues: " + oneSentence(userMemory.getKnownIssues()));
+            String knownIssues = userMemoryFactService.operationalNotesSummary(userId);
+            if (StringUtils.hasText(knownIssues)) {
+                history.add("Known issues: " + oneSentence(knownIssues));
             }
         }
         return history;
