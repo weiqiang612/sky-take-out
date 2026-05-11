@@ -5,8 +5,7 @@ import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionRequest;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
-import com.weiqiang.skyai.memory.repository.RedisChatMemoryRepository;
-import com.weiqiang.skyai.memory.service.UserMemoryFactService;
+import com.weiqiang.skyai.memory.service.ChatHistoryService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -17,12 +16,10 @@ import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
 
 /**
  * Advisor for recognizing user intents in chat messages.
@@ -32,29 +29,24 @@ import java.util.regex.Pattern;
 public class IntentRecognitionAdvisor implements CallAdvisor {
 
     private static final String INTENT_RESULT_KEY = "intentResult";
-    private static final Pattern ORDER_ID_PATTERN = Pattern.compile("order[_\\s-]?id[:=\\s]+([a-zA-Z0-9-]+)", Pattern.CASE_INSENSITIVE);
-
     private final CustomerIntentRecognitionClient customerIntentRecognitionClient;
-    private final RedisChatMemoryRepository redisChatMemoryRepository;
-    private final UserMemoryFactService userMemoryFactService;
+    private final ChatHistoryService chatHistoryService;
 
     public IntentRecognitionAdvisor(CustomerIntentRecognitionClient customerIntentRecognitionClient,
-                                    RedisChatMemoryRepository redisChatMemoryRepository,
-                                    UserMemoryFactService userMemoryFactService) {
+                                    ChatHistoryService chatHistoryService) {
         this.customerIntentRecognitionClient = customerIntentRecognitionClient;
-        this.redisChatMemoryRepository = redisChatMemoryRepository;
-        this.userMemoryFactService = userMemoryFactService;
+        this.chatHistoryService = chatHistoryService;
     }
 
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
-        String conversationId = stringParam(chatClientRequest, ChatMemory.CONVERSATION_ID, ChatMemory.DEFAULT_CONVERSATION_ID);
-        String userId = stringParam(chatClientRequest, "userId", null);
-        String userText = chatClientRequest.prompt().getUserMessage().getText();
-
-        IntentRecognitionResult result = customerIntentRecognitionClient.recognize(new IntentRecognitionRequest(userText, null));
-        if (result != null && result.confidence() != ConfidenceLevel.LOW) {
-            result = customerIntentRecognitionClient.recognize(new IntentRecognitionRequest(userText, buildHistory(conversationId, userId)));
+        // 优先使用 controller 预识别的结果，避免重复调用意图识别服务
+        IntentRecognitionResult result = (IntentRecognitionResult) chatClientRequest.context().get("preRecognizedIntent");
+        if (result == null) {
+            String conversationId = stringParam(chatClientRequest, ChatMemory.CONVERSATION_ID, ChatMemory.DEFAULT_CONVERSATION_ID);
+            String userId = stringParam(chatClientRequest, "userId", null);
+            String userText = chatClientRequest.prompt().getUserMessage().getText();
+            result = customerIntentRecognitionClient.recognize(new IntentRecognitionRequest(userText, chatHistoryService.buildHistory(conversationId, userId)));
         }
         if (result == null) {
             result = new IntentRecognitionResult(IntentType.OTHER, ConfidenceLevel.LOW, Map.of(), List.of(), null, false, null);
@@ -76,44 +68,7 @@ public class IntentRecognitionAdvisor implements CallAdvisor {
         return Ordered.HIGHEST_PRECEDENCE;
     }
 
-    private List<String> buildHistory(String conversationId, String userId) {
-        List<String> history = new ArrayList<>();
-        List<org.springframework.ai.chat.messages.Message> messages = redisChatMemoryRepository.findByConversationId(conversationId);
-        int start = Math.max(0, messages.size() - 4);
-        for (int i = start; i < messages.size(); i++) {
-            history.add(messages.get(i).getMessageType() + ": " + safeText(messages.get(i).getText()));
-        }
-        String orderId = extractOrderId(messages);
-        if (StringUtils.hasText(orderId)) {
-            history.add("Known order id: " + orderId);
-        }
-        if (StringUtils.hasText(userId)) {
-            String knownIssues = userMemoryFactService.operationalNotesSummary(userId);
-            if (StringUtils.hasText(knownIssues)) {
-                history.add("Known issues: " + oneSentence(knownIssues));
-            }
-        }
-        return history;
-    }
-
-    private String extractOrderId(List<org.springframework.ai.chat.messages.Message> messages) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            Matcher matcher = ORDER_ID_PATTERN.matcher(safeText(messages.get(i).getText()));
-            if (matcher.find()) {
-                return matcher.group(1);
-            }
-        }
-        return null;
-    }
-
-    private String oneSentence(String text) {
-        int end = text.indexOf('.');
-        return end >= 0 ? text.substring(0, end + 1).trim() : text.trim();
-    }
-
-    private String safeText(String text) {
-        return StringUtils.hasText(text) ? text.trim() : "";
-    }
+    // buildHistory/related helpers moved to ChatHistoryService
 
     private String stringParam(ChatClientRequest request, String key, String fallback) {
         Object value = request.context().get(key);
