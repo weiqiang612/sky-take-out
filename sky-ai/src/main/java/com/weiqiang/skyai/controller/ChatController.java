@@ -12,6 +12,7 @@ import com.weiqiang.skyai.memory.service.MemoryWriterService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -21,6 +22,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 @RestController
 @RequestMapping("/ai")
@@ -76,8 +79,16 @@ public class ChatController {
         }
 
         // 继续处理，这次 advisor 中检测到已有意图结果可以跳过识别
+        List<CallAdvisor> advisors = new ArrayList<>();
+        advisors.add(intentRecognitionAdvisor);
+        advisors.add(userContextAdvisor);
+        advisors.add(messageChatMemoryAdvisor);
+        if (shouldUseRag(preIntent)) {
+            advisors.add(questionAnswerAdvisor);
+        }
+        advisors.add(toolFilterAdvisor);
         ChatClientResponse response = chatClientBuilder.build().prompt()
-                .advisors(intentRecognitionAdvisor, userContextAdvisor, messageChatMemoryAdvisor, questionAnswerAdvisor, toolFilterAdvisor)
+                .advisors(advisors.toArray(CallAdvisor[]::new))
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId).param("userId", userId).param("preRecognizedIntent", preIntent))
                 .toolContext(Map.of("userId", userId))
                 .user(question)
@@ -89,5 +100,9 @@ public class ChatController {
                 "question", question,
                 "answer", response.chatResponse().getResult().getOutput().getText()
         );
+    }
+
+    private boolean shouldUseRag(IntentRecognitionResult intentResult) {
+        return intentResult != null && intentResult.intent() == IntentType.FAQ;
     }
 }
