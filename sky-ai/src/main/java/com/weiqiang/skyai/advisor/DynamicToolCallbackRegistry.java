@@ -1,4 +1,4 @@
-package com.weiqiang.skyai.memory.advisor;
+package com.weiqiang.skyai.advisor;
 
 import com.weiqiang.skyai.tools.AddressTools;
 import com.weiqiang.skyai.tools.CartTools;

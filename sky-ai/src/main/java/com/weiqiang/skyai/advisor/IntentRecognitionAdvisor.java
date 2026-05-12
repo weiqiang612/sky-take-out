@@ -1,4 +1,4 @@
-package com.weiqiang.skyai.memory.advisor;
+package com.weiqiang.skyai.advisor;
 
 import com.weiqiang.skyai.intent_recognition.client.CustomerIntentRecognitionClient;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
@@ -11,6 +11,8 @@ import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisor;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
@@ -26,7 +28,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class IntentRecognitionAdvisor implements CallAdvisor {
+public class IntentRecognitionAdvisor implements CallAdvisor, StreamAdvisor {
 
     private static final String INTENT_RESULT_KEY = "intentResult";
     private final CustomerIntentRecognitionClient customerIntentRecognitionClient;
@@ -55,6 +57,24 @@ public class IntentRecognitionAdvisor implements CallAdvisor {
         Map<String, Object> context = new HashMap<>(chatClientRequest.context());
         context.put(INTENT_RESULT_KEY, result);
         return callAdvisorChain.nextCall(chatClientRequest.mutate().context(context).build());
+    }
+
+    @Override
+    public reactor.core.publisher.Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
+        IntentRecognitionResult result = (IntentRecognitionResult) chatClientRequest.context().get("preRecognizedIntent");
+        if (result == null) {
+            String conversationId = stringParam(chatClientRequest, ChatMemory.CONVERSATION_ID, ChatMemory.DEFAULT_CONVERSATION_ID);
+            String userId = stringParam(chatClientRequest, "userId", null);
+            String userText = chatClientRequest.prompt().getUserMessage().getText();
+            result = customerIntentRecognitionClient.recognize(new IntentRecognitionRequest(userText, chatHistoryService.buildHistory(conversationId, userId)));
+        }
+        if (result == null) {
+            result = new IntentRecognitionResult(IntentType.OTHER, ConfidenceLevel.LOW, Map.of(), List.of(), null, false, null);
+        }
+
+        Map<String, Object> context = new HashMap<>(chatClientRequest.context());
+        context.put(INTENT_RESULT_KEY, result);
+        return streamAdvisorChain.nextStream(chatClientRequest.mutate().context(context).build());
     }
 
     @Override

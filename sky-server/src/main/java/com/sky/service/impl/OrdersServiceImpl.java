@@ -341,6 +341,9 @@ public class OrdersServiceImpl implements OrdersService {
             throw new OrderBusinessException("查询订单id不能为NULL！");
         }
         Orders order = ordersMapper.getById(id);
+        if (order == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
         OrderVO orderVO = new OrderVO();
         BeanUtils.copyProperties(order, orderVO);
         // 1. 封装菜品信息字符串

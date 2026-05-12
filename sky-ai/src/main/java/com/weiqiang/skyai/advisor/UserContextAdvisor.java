@@ -1,13 +1,16 @@
-package com.weiqiang.skyai.memory.advisor;
+package com.weiqiang.skyai.advisor;
 
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.memory.service.UserMemoryFactService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisor;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -24,8 +27,9 @@ import java.util.Set;
 /**
  * Advisor for injecting user context into the prompt based on recognized intents and user memory.
  */
+@Slf4j
 @Component
-public class UserContextAdvisor implements CallAdvisor {
+public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
     private final UserMemoryFactService userMemoryFactService;
 
@@ -46,6 +50,24 @@ public class UserContextAdvisor implements CallAdvisor {
         instructions.add(0, new SystemMessage(contextBlock));
         Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
         return callAdvisorChain.nextCall(chatClientRequest.mutate().prompt(prompt).build());
+    }
+
+    @Override
+    public reactor.core.publisher.Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
+        IntentRecognitionResult intentResult = (IntentRecognitionResult) chatClientRequest.context().get("intentResult");
+        log.info("UserContextAdvisor got intentResult: {}", intentResult);  // ← 加这行日志
+        Set<String> tools = allowedTools(intentResult);
+        log.info("Computed allowedTools: {}", tools);  // ← 加这行日志
+        chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
+        String userId = stringParam(chatClientRequest, "userId");
+        String contextBlock = buildContextBlock(intentResult, userId);
+        if (!StringUtils.hasText(contextBlock)) {
+            return streamAdvisorChain.nextStream(chatClientRequest);
+        }
+        List<Message> instructions = new ArrayList<>(chatClientRequest.prompt().getInstructions());
+        instructions.add(0, new SystemMessage(contextBlock));
+        Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
+        return streamAdvisorChain.nextStream(chatClientRequest.mutate().prompt(prompt).build());
     }
 
     @Override

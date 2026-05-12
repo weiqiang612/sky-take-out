@@ -22,9 +22,10 @@ public class OrderTools {
     private final ObjectMapper objectMapper;
     private final ToolSearchFormatter searchFormatter;
 
-    @Tool(description = "Get the current user's order details by order id.")
-    public String getOrderDetail(@ToolParam(description = "Order id") String orderId, ToolContext context) {
-        return orderGateway.getOrderDetail(ToolUser.userId(context), orderId);
+    @Tool(description = "Get the current user's order details by order ref.")
+    public String getOrderDetail(@ToolParam(description = "User-visible order number or internal order id") String orderRef, ToolContext context) {
+        Long orderId = resolveOrderId(orderRef, context);
+        return orderGateway.getOrderDetail(ToolUser.userId(context), orderId.toString());
     }
 
     @Tool(description = "List the current user's most recent orders.")
@@ -77,10 +78,11 @@ public class OrderTools {
     }
 
     @Tool(description = "Update the delivery address for an order.")
-    public String updateDeliveryAddress(@ToolParam(description = "Order id") String orderId,
+    public String updateDeliveryAddress(@ToolParam(description = "User-visible order number or internal order id") String orderRef,
                                         @ToolParam(description = "New delivery address") String newAddress,
                                         ToolContext context) {
-        return orderGateway.updateDeliveryAddress(ToolUser.userId(context), orderId, newAddress);
+        Long orderId = resolveOrderId(orderRef, context);
+        return orderGateway.updateDeliveryAddress(ToolUser.userId(context), orderId.toString(), newAddress);
     }
 
     @Tool(description = "Send an order reminder to the shop for the current user's order. The orderRef parameter may be the user-visible order number or the internal order id; if the user provides an order number, resolve it to the internal id first.")
@@ -94,8 +96,9 @@ public class OrderTools {
     }
 
     @Tool(description = "Add all items from a previous order back into the current user's cart.")
-    public String reorder(@ToolParam(description = "Order id") String orderId, ToolContext context) {
-        return orderGateway.reorder(ToolUser.userId(context), orderId);
+    public String reorder(@ToolParam(description = "User-visible order number or internal order id") String orderRef, ToolContext context) {
+        Long orderId = resolveOrderId(orderRef, context);
+        return orderGateway.reorder(ToolUser.userId(context), orderId.toString());
     }
 
     private void addOrderCandidate(List<ToolSearchFormatter.SearchCandidate> candidates, JsonNode order,

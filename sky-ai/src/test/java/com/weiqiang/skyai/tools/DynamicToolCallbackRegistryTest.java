@@ -1,7 +1,7 @@
 package com.weiqiang.skyai.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.weiqiang.skyai.memory.advisor.DynamicToolCallbackRegistry;
+import com.weiqiang.skyai.advisor.DynamicToolCallbackRegistry;
 import com.weiqiang.skyai.tools.gateway.AddressGateway;
 import com.weiqiang.skyai.tools.gateway.CartGateway;
 import com.weiqiang.skyai.tools.gateway.MenuGateway;

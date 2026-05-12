@@ -1,4 +1,4 @@
-package com.weiqiang.skyai.memory.advisor;
+package com.weiqiang.skyai.advisor;
 
 import java.util.LinkedHashSet;
 import java.util.Set;

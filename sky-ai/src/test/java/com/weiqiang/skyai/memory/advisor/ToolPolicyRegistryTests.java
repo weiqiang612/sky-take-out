@@ -1,5 +1,6 @@
 package com.weiqiang.skyai.memory.advisor;
 
+import com.weiqiang.skyai.advisor.ToolPolicyRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
