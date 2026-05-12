@@ -53,16 +53,27 @@ public class OrderTools {
         return searchFormatter.format("orders", keyword, topCandidates);
     }
 
-    @Tool(description = "Cancel an unpaid or unconfirmed order for the current user.")
-    public String cancelOrder(@ToolParam(description = "Order id") String orderId, ToolContext context) {
-        return orderGateway.cancelOrder(ToolUser.userId(context), orderId);
+    @Tool(description = "Cancel an unpaid or unconfirmed order for the current user. The orderRef parameter may be the user-visible order number or the internal order id; if the user provides an order number, resolve it to the internal id first.")
+    public String cancelOrder(@ToolParam(description = "User-visible order number or internal order id; resolve an order number to the internal id before calling the service.") String orderRef,
+                              ToolContext context) {
+        try {
+            Long orderId = resolveOrderId(orderRef, context);
+            return orderGateway.cancelOrder(ToolUser.userId(context), orderId.toString());
+        } catch (IllegalArgumentException ex) {
+            return ex.getMessage();
+        }
     }
 
-    @Tool(description = "Request a refund for an order.")
-    public String requestRefund(@ToolParam(description = "Order id") String orderId,
+    @Tool(description = "Request a refund for an order. The orderRef parameter may be the user-visible order number or the internal order id; if the user provides an order number, resolve it to the internal id first.")
+    public String requestRefund(@ToolParam(description = "User-visible order number or internal order id; resolve an order number to the internal id before calling the service.") String orderRef,
                                 @ToolParam(description = "Refund reason") String reason,
                                 ToolContext context) {
-        return orderGateway.requestRefund(ToolUser.userId(context), orderId, reason);
+        try {
+            Long orderId = resolveOrderId(orderRef, context);
+            return orderGateway.requestRefund(ToolUser.userId(context), orderId.toString(), reason);
+        } catch (IllegalArgumentException ex) {
+            return ex.getMessage();
+        }
     }
 
     @Tool(description = "Update the delivery address for an order.")
@@ -72,9 +83,14 @@ public class OrderTools {
         return orderGateway.updateDeliveryAddress(ToolUser.userId(context), orderId, newAddress);
     }
 
-    @Tool(description = "Send an order reminder to the shop for the current user's order.")
-    public String remindOrder(@ToolParam(description = "Order id") String orderId, ToolContext context) {
-        return orderGateway.remindOrder(ToolUser.userId(context), orderId);
+    @Tool(description = "Send an order reminder to the shop for the current user's order. The orderRef parameter may be the user-visible order number or the internal order id; if the user provides an order number, resolve it to the internal id first.")
+    public String remindOrder(@ToolParam(description = "User-visible order number or internal order id; resolve an order number to the internal id before calling the service.") String orderRef, ToolContext context) {
+        try {
+            Long orderId = resolveOrderId(orderRef, context);
+            return orderGateway.remindOrder(ToolUser.userId(context), orderId.toString());
+        } catch (IllegalArgumentException ex) {
+            return ex.getMessage();
+        }
     }
 
     @Tool(description = "Add all items from a previous order back into the current user's cart.")
@@ -165,6 +181,11 @@ public class OrderTools {
         return value.isMissingNode() || value.isNull() ? null : value.asText();
     }
 
+    private Long longValue(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        return value.isMissingNode() || value.isNull() ? null : value.asLong();
+    }
+
     private boolean contains(String source, String keyword) {
         return hasText(source) && hasText(keyword) && source.toLowerCase(Locale.ROOT).contains(keyword);
     }
@@ -179,5 +200,67 @@ public class OrderTools {
 
     private String defaultText(String value) {
         return hasText(value) ? value : "unknown";
+    }
+
+    private Long resolveOrderId(String orderRef, ToolContext context) {
+        String trimmedOrderRef = orderRef == null ? "" : orderRef.trim();
+        if (trimmedOrderRef.isEmpty()) {
+            throw new IllegalArgumentException("未找到对应订单，请提供正确的订单号或先查询最近订单。");
+        }
+        List<JsonNode> recentOrders = recentOrders(context);
+        List<Long> numberMatches = new ArrayList<>();
+        for (JsonNode order : recentOrders) {
+            Long id = longValue(order, "id");
+            if (id != null && trimmedOrderRef.equals(text(order, "number"))) {
+                numberMatches.add(id);
+            }
+        }
+        if (numberMatches.size() == 1) {
+            return numberMatches.get(0);
+        }
+        if (numberMatches.size() > 1) {
+            throw new IllegalArgumentException("未找到对应订单，请提供正确的订单号或先查询最近订单。");
+        }
+        List<Long> idMatches = new ArrayList<>();
+        for (JsonNode order : recentOrders) {
+            Long id = longValue(order, "id");
+            if (id != null && trimmedOrderRef.equals(id.toString())) {
+                idMatches.add(id);
+            }
+        }
+        if (idMatches.size() == 1) {
+            return idMatches.get(0);
+        }
+        throw new IllegalArgumentException("未找到对应订单，请提供正确的订单号或先查询最近订单。");
+    }
+
+    private List<JsonNode> recentOrders(ToolContext context) {
+        String payload = null;
+        if (context != null && context.getContext() != null) {
+            Object recentOrders = context.getContext().get("recentOrders");
+            if (recentOrders instanceof String value) {
+                payload = value;
+            } else if (recentOrders instanceof JsonNode node) {
+                payload = node.toString();
+            }
+        }
+        if (payload == null) {
+            payload = orderGateway.listRecentOrders(ToolUser.userId(context), 10);
+        }
+        JsonNode root = readTree(payload);
+        JsonNode records = root.path("records");
+        if (records.isArray()) {
+            return toList(records);
+        }
+        if (root.isArray()) {
+            return toList(root);
+        }
+        return List.of();
+    }
+
+    private List<JsonNode> toList(JsonNode arrayNode) {
+        List<JsonNode> orders = new ArrayList<>();
+        arrayNode.forEach(orders::add);
+        return orders;
     }
 }
