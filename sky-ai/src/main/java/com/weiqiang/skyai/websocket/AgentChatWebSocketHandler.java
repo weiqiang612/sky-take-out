@@ -1,7 +1,9 @@
 package com.weiqiang.skyai.websocket;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
+import com.weiqiang.skyai.websocket.model.AgentChatCancelledFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatConfirmationFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatDoneFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatErrorFrame;
@@ -18,6 +20,8 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import reactor.core.Disposable;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -26,10 +30,12 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     private static final String PENDING_QUESTION_KEY = "pendingQuestion";
     private static final String PENDING_INTENT_KEY = "pendingIntent";
-    private static final String ACTIVE_SUBSCRIPTION_KEY = "activeSubscription";
+    private static final String ACTIVE_CONVERSATION_ID_KEY = "activeConversationId";
+    private static final String CANCEL_TYPE = "cancel";
 
     private final AgentChatService agentChatService;
     private final ObjectMapper objectMapper;
+    private final ConcurrentHashMap<String, Disposable> activeStreams = new ConcurrentHashMap<>();
 
     public AgentChatWebSocketHandler(AgentChatService agentChatService, ObjectMapper objectMapper) {
         this.agentChatService = agentChatService;
@@ -39,7 +45,13 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void handleTextMessage(WebSocketSession session, TextMessage message) {
         try {
-            AgentChatRequest request = objectMapper.readValue(message.getPayload(), AgentChatRequest.class);
+            JsonNode frame = objectMapper.readTree(message.getPayload());
+            String type = safeText(frame.path("type").asText(""));
+            if (CANCEL_TYPE.equals(type)) {
+                handleCancel(session, safeText(frame.path("conversationId").asText("")));
+                return;
+            }
+            AgentChatRequest request = objectMapper.treeToValue(frame, AgentChatRequest.class);
             if (request.isConfirmation()) {
                 handleConfirmation(session, request);
                 return;
@@ -53,7 +65,8 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        disposeActiveSubscription(session);
+        String conversationId = safeText((String) session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY));
+        disposeActiveSubscription(conversationId);
         session.getAttributes().remove(PENDING_QUESTION_KEY);
         session.getAttributes().remove(PENDING_INTENT_KEY);
     }
@@ -112,29 +125,21 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
                                 String conversationId,
                                 String userId,
                                 IntentRecognitionResult preIntent) {
-        log.info("走到了startSteaming...");
-        // 在开始新的流式聊天之前，先检查并清理掉当前会话中可能存在的任何未完成的流式订阅，以避免资源泄漏和重复响应的问题。
-        disposeActiveSubscription(session);
-        // 使用AtomicReference来保存上一次收到的完整文本和最终确认的意图结果，以便在处理每个增量响应时能够正确计算出新的增量内容并在流式过程中持续更新最终的意图结果。
+        disposeActiveSubscription(conversationId);
         AtomicReference<String> lastText = new AtomicReference<>("");
-        // 初始时将预先识别的意图结果设置为最终意图，随着流式响应的进行，如果AI模型在上下文中返回了新的意图结果，就会更新这个AtomicReference，以确保在聊天完成时能够写入正确的最终意图结果到聊天记录中，并发送给前端。
         AtomicReference<IntentRecognitionResult> finalIntent = new AtomicReference<>(preIntent);
         Disposable subscription = agentChatService.streamChat(question, conversationId, userId, preIntent)
                 .subscribe(
-                        // 每次收到AI响应的增量内容时，都会调用handleStreamChunk方法来处理并发送给前端
                         response -> handleStreamChunk(session, response, lastText, finalIntent),
-                        // 如果在流式过程中发生错误，会调用handleStreamError方法来处理错误并通知前端
-                        ex -> handleStreamError(session, ex),
-                        // 当流式完成时（无论是正常完成还是发生错误），都会调用这个回调来进行清理工作，比如写入聊天记录和发送完成消息
-                        () -> {
-                            try {
-                                agentChatService.writeTurn(userId, conversationId, finalIntent.get());
-                                sendDone(session, finalIntent.get());
-                            } finally {
-                                session.getAttributes().remove(ACTIVE_SUBSCRIPTION_KEY);
-                            }
-                        });
-        session.getAttributes().put(ACTIVE_SUBSCRIPTION_KEY, subscription);
+                        ex -> handleStreamError(session, conversationId, ex),
+                        () -> handleStreamComplete(session, conversationId, userId, finalIntent.get())
+                );
+        if (subscription.isDisposed()) {
+            session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
+            return;
+        }
+        activeStreams.put(conversationId, subscription);
+        session.getAttributes().put(ACTIVE_CONVERSATION_ID_KEY, conversationId);
     }
 
     private void handleStreamChunk(WebSocketSession session,
@@ -155,10 +160,37 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private void handleStreamError(WebSocketSession session, Throwable ex) {
-        sendError(session, "AI response failed");
-        session.getAttributes().remove(ACTIVE_SUBSCRIPTION_KEY);
+    private void handleStreamComplete(WebSocketSession session,
+                                      String conversationId,
+                                      String userId,
+                                      @Nullable IntentRecognitionResult intentResult) {
+        try {
+            agentChatService.writeTurn(userId, conversationId, intentResult);
+            sendDone(session, intentResult);
+        } finally {
+            disposeActiveSubscription(conversationId);
+            session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
+        }
+    }
+
+    private void handleStreamError(WebSocketSession session, String conversationId, Throwable ex) {
+        sendError(session, errorMessage(ex));
+        disposeActiveSubscription(conversationId);
+        session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
         log.error("WebSocket chat stream failed", ex);
+    }
+
+    private void handleCancel(WebSocketSession session, String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            sendError(session, "conversationId is required");
+            return;
+        }
+        disposeActiveSubscription(conversationId);
+        String activeConversationId = safeText((String) session.getAttributes().get(ACTIVE_CONVERSATION_ID_KEY));
+        if (conversationId.equals(activeConversationId)) {
+            session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
+        }
+        send(session, new AgentChatCancelledFrame("cancelled", conversationId));
     }
 
     private void sendConfirmation(WebSocketSession session, AgentChatConfirmationFrame frame) {
@@ -190,13 +222,12 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    /**
-     * 在开始新的流式聊天之前，先检查并清理掉当前会话中可能存在的任何未完成的流式订阅，以避免资源泄漏和重复响应的问题。
-     * 这个方法会从WebSocketSession的属性中获取当前活跃的订阅对象，如果存在且是一个Disposable实例，就调用它的dispose方法来取消订阅，并从属性中移除这个键值对。
-     */
-    private void disposeActiveSubscription(WebSocketSession session) {
-        Object active = session.getAttributes().remove(ACTIVE_SUBSCRIPTION_KEY);
-        if (active instanceof Disposable disposable) {
+    private void disposeActiveSubscription(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return;
+        }
+        Disposable disposable = activeStreams.remove(conversationId);
+        if (disposable != null) {
             disposable.dispose();
         }
     }
@@ -225,5 +256,23 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     private String safeText(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
+    }
+
+    private String errorMessage(Throwable ex) {
+        if (isTimeout(ex)) {
+            return "本次回复超时了，请稍后重试，或换一种说法再试一次。";
+        }
+        return "AI response failed";
+    }
+
+    private boolean isTimeout(Throwable ex) {
+        Throwable current = ex;
+        while (current != null) {
+            if (current instanceof TimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

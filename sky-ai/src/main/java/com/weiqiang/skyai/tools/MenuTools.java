@@ -26,13 +26,13 @@ public class MenuTools {
         return menuGateway.listCategories(type);
     }
 
-    @Tool(description = "Search dish candidates by dish name, description, category name, or flavor before selecting a dish id.")
+    @Tool(description = "Search dish candidates by dish name, description, category name, or flavor before selecting a dish id, then add the unique match directly instead of searching again.")
     public String searchDishes(@ToolParam(description = "Dish keyword or a fragment from the dish details") String keyword,
                                @ToolParam(description = "Maximum number of candidates to return", required = false) Integer limit) {
         return searchMenuItems("dishes", 1, keyword, limit, true);
     }
 
-    @Tool(description = "Search setmeal candidates by name, description, category name, or included dishes before selecting a setmeal id.")
+    @Tool(description = "Search setmeal candidates by name, description, category name, or included dishes before selecting a setmeal id, then add the unique match directly instead of searching again.")
     public String searchSetmeals(@ToolParam(description = "Setmeal keyword or a fragment from the setmeal details") String keyword,
                                  @ToolParam(description = "Maximum number of candidates to return", required = false) Integer limit) {
         return searchMenuItems("setmeals", 2, keyword, limit, false);

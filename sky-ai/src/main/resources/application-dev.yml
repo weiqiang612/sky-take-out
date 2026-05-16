@@ -22,11 +22,13 @@ spring:
       chat: openai
       embedding: ollama
     openai:
-      base-url: ${OPENAI_BASE_URL:http://127.0.0.1:3030}
+      base-url: ${OPENAI_BASE_URL:https://openrouter.ai/api}
+#      base-url: ${OPENAI_BASE_URL:http://127.0.0.1:3030}
+#      base-url: ${OPENAI_BASE_URL:https://api.siliconflow.cn}
       api-key: ${OPENAI_API_KEY:temp_key}
       chat:
         options:
-          model: ${OPENAI_CHAT_MODEL:gpt-4o}
+          model: ${OPENAI_CHAT_MODEL:deepseek/deepseek-v4-flash}
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
       embedding:

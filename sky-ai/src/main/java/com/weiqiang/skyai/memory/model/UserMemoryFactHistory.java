@@ -15,9 +15,9 @@ import java.time.Instant;
 @Getter
 @Setter
 @Entity
-@IdClass(UserMemoryFactId.class)
-@Table(name = "user_memory_fact")
-public class UserMemoryFact {
+@IdClass(UserMemoryFactHistoryId.class)
+@Table(name = "user_memory_fact_history")
+public class UserMemoryFactHistory {
 
     @Id
     @Column(name = "user_id", nullable = false)
@@ -27,8 +27,15 @@ public class UserMemoryFact {
     @Column(name = "fact_key", nullable = false)
     private String factKey;
 
-    @Column(name = "fact_value", nullable = false, columnDefinition = "text")
-    private String factValue;
+    @Id
+    @Column(name = "changed_at", nullable = false)
+    private Instant changedAt;
+
+    @Column(name = "old_value", columnDefinition = "text")
+    private String oldValue;
+
+    @Column(name = "new_value", columnDefinition = "text")
+    private String newValue;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false)
@@ -36,10 +43,4 @@ public class UserMemoryFact {
 
     @Column(name = "confidence")
     private Double confidence;
-
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    private Instant updatedAt;
 }

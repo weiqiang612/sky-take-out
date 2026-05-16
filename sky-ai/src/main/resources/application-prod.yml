@@ -1,38 +1,60 @@
-server:
-  port: ${SERVER_PORT}
-
 spring:
   datasource:
     url: ${SKY_AI_DATASOURCE_URL}
     username: ${SKY_AI_DATASOURCE_USERNAME}
     password: ${SKY_AI_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      connect-timeout: 5000ms
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+          max-wait: 10000ms
   ai:
     model:
-      chat: ollama
-      embedding: ollama
-    ollama:
-      base-url: ${OLLAMA_BASE_URL}
+      chat: openai
+      embedding: openai
+    openai:
+      base-url: ${OPENAI_BASE_URL:https://openrouter.ai/api}
+      api-key: ${OPENAI_API_KEY:temp_key}
       chat:
         options:
-          model: ${OLLAMA_CHAT_MODEL}
+          model: ${OPENAI_CHAT_MODEL:deepseek-ai/DeepSeek-V4-Flash}
       embedding:
         options:
-          model: ${OLLAMA_EMBEDDING_MODEL}
+          model: ${OPENAI_EMBEDDING_MODEL:qwen/qwen3-embedding-8b}
     vectorstore:
       pgvector:
         initialize-schema: true
-        dimensions: 1024
+        dimensions: 4096
         index-type: HNSW
         distance-type: COSINE_DISTANCE
+
 skyai:
   retrieval:
     online:
       top-k: ${SKY_AI_RETRIEVAL_TOP_K:80}
       top-n: ${SKY_AI_RETRIEVAL_TOP_N:8}
-      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.0}
+      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.5}
       fallback-to-embedding-results-on-rerank-failure: ${SKY_AI_RETRIEVAL_FALLBACK_ON_RERANK_FAILURE:true}
+      query-expansion:
+        enabled: ${SKY_AI_QUERY_EXPANSION_ENABLED:true}
+        max-queries: ${SKY_AI_QUERY_EXPANSION_MAX_QUERIES:2}
+        fallback-on-failure: ${SKY_AI_QUERY_EXPANSION_FALLBACK_ON_FAILURE:true}
+      keyword:
+        enabled: ${SKY_AI_KEYWORD_RETRIEVAL_ENABLED:true}
+        top-k: ${SKY_AI_KEYWORD_RETRIEVAL_TOP_K:40}
+      fusion:
+        max-candidates: ${SKY_AI_RETRIEVAL_FUSION_MAX_CANDIDATES:120}
+        rrf-k: ${SKY_AI_RETRIEVAL_FUSION_RRF_K:60}
       siliconflow:
-        base-url: ${SILICONFLOW_BASE_URL:https://api.siliconflow.cn}
-        api-key: ${SILICONFLOW_API_KEY:}
-        model: ${SILICONFLOW_RERANKER_MODEL:BAAI/bge-reranker-v2-m3}
+        base-url: ${RERANKER_BASE_URL:https://openrouter.ai/api}
+        api-key: ${OPENAI_API_KEY:temp_key}
+        model: ${SILICONFLOW_RERANKER_MODEL:cohere/rerank-4-pro}

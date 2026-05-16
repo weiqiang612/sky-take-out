@@ -96,13 +96,15 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
             case MENU_QUERY -> joinSentences(List.of(
                     memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId)),
                     sentence("If the user names a dish or setmeal, search the menu first and then act on the unique match directly."),
-                    sentence("Do not ask the user to provide an id when search tools can resolve it.")
+                    sentence("Do not ask the user to provide an id when search tools can resolve it."),
+                    sentence("If a unique match is already found, do not repeat the same lookup or re-ask for details.")
             ));
             case CART_MANAGEMENT -> joinSentences(List.of(
                     memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId)),
                     sentence("The current user may manage their own cart directly."),
                     sentence("If the user names a dish or setmeal, search the menu first and then add the unique match directly."),
-                    sentence("Do not ask for menu access, do not ask the user to provide an id when search tools can resolve it.")
+                    sentence("Do not ask for menu access, do not ask the user to provide an id when search tools can resolve it."),
+                    sentence("If a unique match is already found, do not repeat the same lookup or re-ask for details.")
             ));
             case ADDRESS_MANAGEMENT -> joinSentences(List.of(
                     memorySentence("Default address", userMemoryFactService.defaultAddressSummary(userId)),

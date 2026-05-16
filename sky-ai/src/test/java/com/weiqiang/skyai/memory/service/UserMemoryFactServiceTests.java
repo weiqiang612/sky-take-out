@@ -4,7 +4,9 @@ import com.weiqiang.skyai.memory.model.MemoryFactKey;
 import com.weiqiang.skyai.memory.model.MemoryFactSourceType;
 import com.weiqiang.skyai.memory.model.UserMemory;
 import com.weiqiang.skyai.memory.model.UserMemoryFact;
+import com.weiqiang.skyai.memory.model.UserMemoryFactHistory;
 import com.weiqiang.skyai.memory.repository.UserMemoryFactRepository;
+import com.weiqiang.skyai.memory.repository.UserMemoryFactHistoryRepository;
 import com.weiqiang.skyai.memory.repository.UserMemoryRepository;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class UserMemoryFactServiceTests {
@@ -24,8 +27,9 @@ class UserMemoryFactServiceTests {
     @Test
     void upsertFactAppendsOperationalNotesAndRefreshesSummary() {
         UserMemoryFactRepository factRepository = mock(UserMemoryFactRepository.class);
+        UserMemoryFactHistoryRepository historyRepository = mock(UserMemoryFactHistoryRepository.class);
         UserMemoryRepository userMemoryRepository = mock(UserMemoryRepository.class);
-        UserMemoryFactService service = new UserMemoryFactService(factRepository, userMemoryRepository);
+        UserMemoryFactService service = new UserMemoryFactService(factRepository, historyRepository, userMemoryRepository);
 
         UserMemoryFact existing = new UserMemoryFact();
         existing.setUserId("u1");
@@ -51,8 +55,9 @@ class UserMemoryFactServiceTests {
     @Test
     void dietaryPreferencesSummaryCombinesStructuredFacts() {
         UserMemoryFactRepository factRepository = mock(UserMemoryFactRepository.class);
+        UserMemoryFactHistoryRepository historyRepository = mock(UserMemoryFactHistoryRepository.class);
         UserMemoryRepository userMemoryRepository = mock(UserMemoryRepository.class);
-        UserMemoryFactService service = new UserMemoryFactService(factRepository, userMemoryRepository);
+        UserMemoryFactService service = new UserMemoryFactService(factRepository, historyRepository, userMemoryRepository);
 
         UserMemoryFact dish = new UserMemoryFact();
         dish.setUserId("u1");
@@ -72,5 +77,41 @@ class UserMemoryFactServiceTests {
 
         assertTrue(summary.contains("喜欢的菜：平菇豆腐汤"));
         assertTrue(summary.contains("口味偏好：清淡"));
+    }
+
+    @Test
+    void upsertFactSkipsLowConfidence() {
+        UserMemoryFactRepository factRepository = mock(UserMemoryFactRepository.class);
+        UserMemoryFactHistoryRepository historyRepository = mock(UserMemoryFactHistoryRepository.class);
+        UserMemoryRepository userMemoryRepository = mock(UserMemoryRepository.class);
+        UserMemoryFactService service = new UserMemoryFactService(factRepository, historyRepository, userMemoryRepository);
+
+        service.upsertFact("u1", MemoryFactKey.DEFAULT_ADDRESS, "No. 1 Road", MemoryFactSourceType.USER, 0.6);
+
+        verifyNoInteractions(factRepository, historyRepository, userMemoryRepository);
+    }
+
+    @Test
+    void upsertFactWritesHistoryForCorrections() {
+        UserMemoryFactRepository factRepository = mock(UserMemoryFactRepository.class);
+        UserMemoryFactHistoryRepository historyRepository = mock(UserMemoryFactHistoryRepository.class);
+        UserMemoryRepository userMemoryRepository = mock(UserMemoryRepository.class);
+        UserMemoryFactService service = new UserMemoryFactService(factRepository, historyRepository, userMemoryRepository);
+
+        UserMemoryFact existing = new UserMemoryFact();
+        existing.setUserId("u1");
+        existing.setFactKey(MemoryFactKey.DEFAULT_ADDRESS.value());
+        existing.setFactValue("Old address");
+        existing.setUpdatedAt(Instant.parse("2026-05-10T00:00:00Z"));
+
+        when(factRepository.findByUserIdAndFactKey("u1", MemoryFactKey.DEFAULT_ADDRESS.value())).thenReturn(Optional.of(existing));
+        when(factRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userMemoryRepository.findById("u1")).thenReturn(Optional.empty());
+        when(userMemoryRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsertFact("u1", MemoryFactKey.DEFAULT_ADDRESS, "New address", MemoryFactSourceType.USER, 0.9, true);
+
+        verify(historyRepository).save(any(UserMemoryFactHistory.class));
+        assertEquals("New address", existing.getFactValue());
     }
 }

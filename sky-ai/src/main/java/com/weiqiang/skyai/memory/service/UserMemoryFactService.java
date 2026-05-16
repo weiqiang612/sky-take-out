@@ -4,9 +4,12 @@ import com.weiqiang.skyai.memory.model.MemoryFactKey;
 import com.weiqiang.skyai.memory.model.MemoryFactSourceType;
 import com.weiqiang.skyai.memory.model.UserMemory;
 import com.weiqiang.skyai.memory.model.UserMemoryFact;
+import com.weiqiang.skyai.memory.model.UserMemoryFactHistory;
 import com.weiqiang.skyai.memory.repository.UserMemoryFactRepository;
+import com.weiqiang.skyai.memory.repository.UserMemoryFactHistoryRepository;
 import com.weiqiang.skyai.memory.repository.UserMemoryRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -18,11 +21,13 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.function.Function;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserMemoryFactService {
 
     private final UserMemoryFactRepository userMemoryFactRepository;
+    private final UserMemoryFactHistoryRepository userMemoryFactHistoryRepository;
     private final UserMemoryRepository userMemoryRepository;
 
     public List<UserMemoryFact> findFacts(String userId) {
@@ -57,19 +62,75 @@ public class UserMemoryFactService {
         return fallback(userId, UserMemory::getKnownIssues);
     }
 
+    /**
+     * Upserts a memory fact with created_at tracking, correction history, and a confidence floor.
+     */
+    /*
+     * Flyway migration:
+     * alter table user_memory_fact add column if not exists created_at timestamp not null default now();
+     * create table if not exists user_memory_fact_history (
+     *     user_id varchar(255) not null,
+     *     fact_key varchar(128) not null,
+     *     old_value text,
+     *     new_value text,
+     *     source_type varchar(32) not null,
+     *     confidence double precision null,
+     *     changed_at timestamp not null,
+     *     primary key (user_id, fact_key, changed_at)
+     * );
+     */
     public void upsertFact(String userId, MemoryFactKey factKey, String factValue, MemoryFactSourceType sourceType, Double confidence) {
+        upsertFact(userId, factKey, factValue, sourceType, confidence, false);
+    }
+
+    /**
+     * Upserts a memory fact and records the previous value when the caller marks the field as a correction.
+     */
+    public void upsertFact(String userId, MemoryFactKey factKey, String factValue, MemoryFactSourceType sourceType, Double confidence, boolean corrected) {
         if (!StringUtils.hasText(userId) || factKey == null || !StringUtils.hasText(factValue)) {
             return;
         }
-        UserMemoryFact fact = userMemoryFactRepository.findByUserIdAndFactKey(userId, factKey.value())
-                .orElseGet(UserMemoryFact::new);
+        if (confidence != null && confidence < 0.7) {
+            log.debug("skip memory fact upsert for userId={}, factKey={}, confidence={}", userId, factKey.value(), confidence);
+            return;
+        }
+        Double effectiveConfidence = confidence == null ? 1.0 : confidence;
+        Instant now = Instant.now();
+        Optional<UserMemoryFact> existingFact = userMemoryFactRepository.findByUserIdAndFactKey(userId, factKey.value());
+        UserMemoryFact fact = existingFact.orElseGet(UserMemoryFact::new);
+        String mergedValue = mergeValue(factKey, existingFact.map(UserMemoryFact::getFactValue).orElse(null), factValue);
+        if (corrected && existingFact.isPresent() && StringUtils.hasText(existingFact.get().getFactValue())) {
+            UserMemoryFactHistory history = new UserMemoryFactHistory();
+            history.setUserId(userId);
+            history.setFactKey(factKey.value());
+            history.setOldValue(existingFact.get().getFactValue());
+            history.setNewValue(mergedValue);
+            history.setSourceType(sourceType == null ? MemoryFactSourceType.INFERRED : sourceType);
+            history.setConfidence(effectiveConfidence);
+            history.setChangedAt(now);
+            userMemoryFactHistoryRepository.save(history);
+        }
         fact.setUserId(userId);
         fact.setFactKey(factKey.value());
-        fact.setFactValue(mergeValue(factKey, fact.getFactValue(), factValue));
+        if (existingFact.isEmpty()) {
+            fact.setCreatedAt(now);
+        }
+        fact.setFactValue(mergedValue);
         fact.setSourceType(sourceType == null ? MemoryFactSourceType.INFERRED : sourceType);
-        fact.setConfidence(confidence);
-        fact.setUpdatedAt(Instant.now());
+        fact.setConfidence(effectiveConfidence);
+        fact.setUpdatedAt(now);
         userMemoryFactRepository.save(fact);
+        refreshUserMemorySummary(userId);
+    }
+
+    /**
+     * Deletes a fact and refreshes the summary so derived user memory stays in sync.
+     */
+    public void deleteFact(String userId, MemoryFactKey factKey) {
+        if (!StringUtils.hasText(userId) || factKey == null) {
+            return;
+        }
+        userMemoryFactRepository.findByUserIdAndFactKey(userId, factKey.value()).ifPresent(userMemoryFactRepository::delete);
         refreshUserMemorySummary(userId);
     }
 

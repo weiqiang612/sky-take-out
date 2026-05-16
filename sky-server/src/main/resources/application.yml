@@ -65,4 +65,4 @@ sky:
     address: 河北省邢台市宁晋县
 
   baidu:
-    ak: tucDL9qtDbA0nNANp85f1ykuObbbpaOA
+    ak: ${SKY_BAIDU_AK:tucDL9qtDbA0nNANp85f1ykuObbbpaOA}

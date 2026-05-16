@@ -3,7 +3,7 @@ package com.weiqiang.skyai.advisor;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-final class ToolPolicyRegistry {
+public final class ToolPolicyRegistry {
 
     private static final Set<String> ALWAYS_VISIBLE_SELF_SERVICE_TOOLS = Set.of(
             "searchOrders",
@@ -37,11 +37,11 @@ final class ToolPolicyRegistry {
     private ToolPolicyRegistry() {
     }
 
-    static Set<String> alwaysVisibleSelfServiceTools() {
+    public static Set<String> alwaysVisibleSelfServiceTools() {
         return ALWAYS_VISIBLE_SELF_SERVICE_TOOLS;
     }
 
-    static Set<String> mergeAllowedTools(Set<String> allowedTools) {
+    public static Set<String> mergeAllowedTools(Set<String> allowedTools) {
         Set<String> merged = new LinkedHashSet<>(ALWAYS_VISIBLE_SELF_SERVICE_TOOLS);
         if (allowedTools != null) {
             merged.addAll(allowedTools);

@@ -1,7 +1,6 @@
 package com.weiqiang.skyai.memory.service;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
@@ -22,6 +21,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -34,15 +34,17 @@ public class MemoryWriterService {
             Return JSON only. No markdown, no code fences, no preamble.
             Extract stable user memory facts from the user's explicit statements only.
             Ignore assistant replies and raw tool payloads; confirmed tool outcomes are persisted separately.
-            Use these keys only: favorite_dishes, favorite_flavors, dietary_restrictions, default_address, operational_notes.
-            If a field is not present, return null.
+            Return an object with optional fact entries and optional corrections.
+            Each fact field must be omitted when there is no new information, or include {"value": ..., "confidence": 0.0-1.0}.
+            A fact entry value may be null to signal that the user wants the fact forgotten.
+            Use these keys only: favorite_dishes, favorite_flavors, dietary_restrictions, default_address, operational_notes, corrections.
             
             Strict Response Requirement:
             Respond ONLY with the JSON object. Do not include any preface, markdown, or analysis.
             Your response MUST start with '{'.
             
             Example Output:
-            {"favorite_dishes":"平菇豆腐汤","favorite_flavors":"清淡","dietary_restrictions":null,"default_address":null,"operational_notes":null}
+            {"favorite_dishes":{"value":["平菇豆腐汤"],"confidence":1.0},"favorite_flavors":{"value":"清淡","confidence":0.9},"corrections":["favorite_flavors"]}
             """;
 
     private static final Pattern ORDER_ID_PATTERN = Pattern.compile("order\\s*(?:id)?\\s*[:：]?\\s*([0-9]+)", Pattern.CASE_INSENSITIVE);
@@ -75,15 +77,22 @@ public class MemoryWriterService {
                 .user(transcript)
                 .call()
                 .content();
-        MemoryExtraction extraction = parse(stripJsonFences(content));
-        log.debug("extracted memory facts for userId={}: favoriteDishes={}, favoriteFlavors={}, dietaryRestrictions={}, defaultAddress={}, operationalNotes={}",
-                userId,
-                extraction.favoriteDishes(),
-                extraction.favoriteFlavors(),
-                extraction.dietaryRestrictions(),
-                extraction.defaultAddress(),
-                extraction.operationalNotes());
-        merge(userId, extraction);
+        parse(stripJsonFences(content)).ifPresent(extraction -> {
+            log.debug("extracted memory facts userId={} favorite_dishes.value={} favorite_dishes.confidence={} favorite_flavors.value={} favorite_flavors.confidence={} dietary_restrictions.value={} dietary_restrictions.confidence={} default_address.value={} default_address.confidence={} operational_notes.value={} operational_notes.confidence={} corrections={}",
+                    userId,
+                    valueOf(extraction.favoriteDishes()),
+                    confidenceOf(extraction.favoriteDishes()),
+                    valueOf(extraction.favoriteFlavors()),
+                    confidenceOf(extraction.favoriteFlavors()),
+                    valueOf(extraction.dietaryRestrictions()),
+                    confidenceOf(extraction.dietaryRestrictions()),
+                    valueOf(extraction.defaultAddress()),
+                    confidenceOf(extraction.defaultAddress()),
+                    valueOf(extraction.operationalNotes()),
+                    confidenceOf(extraction.operationalNotes()),
+                    extraction.corrections());
+            merge(userId, extraction);
+        });
     }
 
     private boolean shouldSkipLongTermWrite(IntentRecognitionResult intentResult) {
@@ -129,21 +138,56 @@ public class MemoryWriterService {
         }
     }
 
+    /**
+     * Applies the structured extraction envelope, skipping absent fields, deleting explicit nulls, and honoring corrections.
+     */
     private void merge(String userId, MemoryExtraction extraction) {
-        if (StringUtils.hasText(extraction.favoriteDishes())) {
-            userMemoryFactService.upsertFact(userId, MemoryFactKey.FAVORITE_DISHES, extraction.favoriteDishes(), MemoryFactSourceType.USER, extraction.confidence());
+        List<String> corrections = extraction.corrections() == null ? List.of() : extraction.corrections();
+
+        if (extraction.favoriteDishes() != null) {
+            if (extraction.favoriteDishes().value() == null || extraction.favoriteDishes().value().isNull()) {
+                userMemoryFactService.deleteFact(userId, MemoryFactKey.FAVORITE_DISHES);
+            } else {
+                userMemoryFactService.upsertFact(userId, MemoryFactKey.FAVORITE_DISHES,
+                        toFactValue(extraction.favoriteDishes().value()), MemoryFactSourceType.USER,
+                        extraction.favoriteDishes().confidence(), corrections.contains(MemoryFactKey.FAVORITE_DISHES.value()));
+            }
         }
-        if (StringUtils.hasText(extraction.favoriteFlavors())) {
-            userMemoryFactService.upsertFact(userId, MemoryFactKey.FAVORITE_FLAVORS, extraction.favoriteFlavors(), MemoryFactSourceType.USER, extraction.confidence());
+        if (extraction.favoriteFlavors() != null) {
+            if (extraction.favoriteFlavors().value() == null || extraction.favoriteFlavors().value().isNull()) {
+                userMemoryFactService.deleteFact(userId, MemoryFactKey.FAVORITE_FLAVORS);
+            } else {
+                userMemoryFactService.upsertFact(userId, MemoryFactKey.FAVORITE_FLAVORS,
+                        toFactValue(extraction.favoriteFlavors().value()), MemoryFactSourceType.USER,
+                        extraction.favoriteFlavors().confidence(), corrections.contains(MemoryFactKey.FAVORITE_FLAVORS.value()));
+            }
         }
-        if (StringUtils.hasText(extraction.dietaryRestrictions())) {
-            userMemoryFactService.upsertFact(userId, MemoryFactKey.DIETARY_RESTRICTIONS, extraction.dietaryRestrictions(), MemoryFactSourceType.USER, extraction.confidence());
+        if (extraction.dietaryRestrictions() != null) {
+            if (extraction.dietaryRestrictions().value() == null || extraction.dietaryRestrictions().value().isNull()) {
+                userMemoryFactService.deleteFact(userId, MemoryFactKey.DIETARY_RESTRICTIONS);
+            } else {
+                userMemoryFactService.upsertFact(userId, MemoryFactKey.DIETARY_RESTRICTIONS,
+                        toFactValue(extraction.dietaryRestrictions().value()), MemoryFactSourceType.USER,
+                        extraction.dietaryRestrictions().confidence(), corrections.contains(MemoryFactKey.DIETARY_RESTRICTIONS.value()));
+            }
         }
-        if (StringUtils.hasText(extraction.defaultAddress())) {
-            userMemoryFactService.upsertFact(userId, MemoryFactKey.DEFAULT_ADDRESS, extraction.defaultAddress(), MemoryFactSourceType.USER, extraction.confidence());
+        if (extraction.defaultAddress() != null) {
+            if (extraction.defaultAddress().value() == null || extraction.defaultAddress().value().isNull()) {
+                userMemoryFactService.deleteFact(userId, MemoryFactKey.DEFAULT_ADDRESS);
+            } else {
+                userMemoryFactService.upsertFact(userId, MemoryFactKey.DEFAULT_ADDRESS,
+                        toFactValue(extraction.defaultAddress().value()), MemoryFactSourceType.USER,
+                        extraction.defaultAddress().confidence(), corrections.contains(MemoryFactKey.DEFAULT_ADDRESS.value()));
+            }
         }
-        if (StringUtils.hasText(extraction.operationalNotes())) {
-            userMemoryFactService.upsertFact(userId, MemoryFactKey.OPERATIONAL_NOTES, extraction.operationalNotes(), MemoryFactSourceType.USER, extraction.confidence());
+        if (extraction.operationalNotes() != null) {
+            if (extraction.operationalNotes().value() == null || extraction.operationalNotes().value().isNull()) {
+                userMemoryFactService.deleteFact(userId, MemoryFactKey.OPERATIONAL_NOTES);
+            } else {
+                userMemoryFactService.upsertFact(userId, MemoryFactKey.OPERATIONAL_NOTES,
+                        toFactValue(extraction.operationalNotes().value()), MemoryFactSourceType.USER,
+                        extraction.operationalNotes().confidence(), corrections.contains(MemoryFactKey.OPERATIONAL_NOTES.value()));
+            }
         }
     }
 
@@ -167,41 +211,28 @@ public class MemoryWriterService {
                 .trim();
     }
 
-    private MemoryExtraction parse(String content) {
-        if (content == null || content.isBlank()) {
-            return new MemoryExtraction("", "", "", "", "", null);
+    /**
+     * Parses the extraction envelope and returns empty when the model response contains no payload.
+     */
+    private Optional<MemoryExtraction> parse(String content) {
+        if (!StringUtils.hasText(content)) {
+            return Optional.empty();
         }
-
         try {
-            // 健壮性处理：提取 JSON 部分，忽略前后的废话
             String jsonMatch = content;
             int firstBrace = content.indexOf("{");
             int lastBrace = content.lastIndexOf("}");
-
             if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
                 jsonMatch = content.substring(firstBrace, lastBrace + 1);
             }
-
-            return objectMapper.readValue(jsonMatch, MemoryExtraction.class);
+            if ("{}".equals(jsonMatch.replaceAll("\\s+", ""))) {
+                return Optional.empty();
+            }
+            return Optional.of(objectMapper.readValue(jsonMatch, MemoryExtraction.class));
         } catch (Exception ex) {
-            // 打印出导致失败的原始内容，方便排查
             log.error("JSON 解析失败，原始响应内容为: \n{}", content);
             throw new IllegalStateException("Failed to parse memory extraction", ex);
         }
-    }
-
-    private String safeText(String text) {
-        return StringUtils.hasText(text) ? text.trim() : "";
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record MemoryExtraction(
-            @JsonProperty("favorite_dishes") String favoriteDishes,
-            @JsonProperty("favorite_flavors") String favoriteFlavors,
-            @JsonProperty("dietary_restrictions") String dietaryRestrictions,
-            @JsonProperty("default_address") String defaultAddress,
-            @JsonProperty("operational_notes") String operationalNotes,
-            @JsonProperty("confidence") Double confidence) {
     }
 
     private String extractOrderId(String responseData) {
@@ -216,5 +247,25 @@ public class MemoryWriterService {
 
     private String today() {
         return LocalDate.now(ZoneId.systemDefault()).toString();
+    }
+
+    private String valueOf(FactEntry factEntry) {
+        if (factEntry == null || factEntry.value() == null || factEntry.value().isNull()) {
+            return null;
+        }
+        JsonNode value = factEntry.value();
+        return value.isValueNode() ? value.asText() : value.toString();
+    }
+
+    private Double confidenceOf(FactEntry factEntry) {
+        return factEntry == null ? null : factEntry.confidence();
+    }
+
+    private String toFactValue(JsonNode value) {
+        return value == null || value.isNull() ? null : (value.isValueNode() ? value.asText() : value.toString());
+    }
+
+    private String safeText(String text) {
+        return StringUtils.hasText(text) ? text.trim() : "";
     }
 }
