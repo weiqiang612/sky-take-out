@@ -134,8 +134,11 @@ jobs:
             docker pull "$SERVER_IMAGE:$IMAGE_TAG"
             docker pull "$AI_IMAGE:$IMAGE_TAG"
 
-            docker rm -f business >/dev/null 2>&1 || true
-            docker rm -f agent >/dev/null 2>&1 || true
+            docker stop -t 10 business >/dev/null 2>&1 || true
+            docker rm business >/dev/null 2>&1 || true
+            
+            docker stop -t 10 agent >/dev/null 2>&1 || true
+            docker rm agent >/dev/null 2>&1 || true
 
             # sky-server prod config reads SKY_DATASOURCE_*, SKY_REDIS_* and the OSS/WeChat secrets
             # directly from the container environment.
@@ -200,3 +203,9 @@ jobs:
               -e OPENAI_API_KEY="$OPENAI_API_KEY" \
               -e SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY" \
               "$AI_IMAGE:$IMAGE_TAG"
+            
+            echo "Starting image cleanup, keeping top 2 versions..."
+            docker images "$SERVER_IMAGE" --format "{{.ID}}" | tail -n +3 | xargs -r docker rmi -f || true
+            docker images "$AI_IMAGE" --format "{{.ID}}" | tail -n +3 | xargs -r docker rmi -f || true
+            docker image prune -f
+            echo "Cleanup completed successfully!"
