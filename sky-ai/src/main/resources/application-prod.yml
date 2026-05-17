@@ -26,7 +26,7 @@ spring:
       api-key: ${OPENAI_API_KEY:temp_key}
       chat:
         options:
-          model: ${OPENAI_CHAT_MODEL:deepseek-ai/DeepSeek-V4-Flash}
+          model: ${OPENAI_CHAT_MODEL:deepseek/deepseek-v4-flash}
       embedding:
         options:
           model: ${OPENAI_EMBEDDING_MODEL:qwen/qwen3-embedding-8b}
