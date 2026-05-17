@@ -25,5 +25,9 @@ sky:
   wechat:
     appid: ${SKY_WECHAT_APPID:}
     secret: ${SKY_WECHAT_SECRET:}
+
   baidu:
     ak: ${SKY_BAIDU_AK:}
+
+  shop:
+    address: 河北省邢台市宁晋县

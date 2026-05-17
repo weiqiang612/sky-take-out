@@ -10,6 +10,7 @@ import com.sky.mapper.UserMapper;
 import com.sky.properties.WeChatProperties;
 import com.sky.service.UserService;
 import com.sky.utils.HttpClientUtil;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,7 @@ import java.util.HashMap;
  * @Date 2026/3/17 14:23
  */
 
+@Slf4j
 @Service
 public class UserServiceImpl implements UserService {
 
@@ -41,17 +43,33 @@ public class UserServiceImpl implements UserService {
      * @return
      */
     private String getOpenid(String code) {
-        // 1. 携带code向微信登录接口发送get请求
         HashMap<String, String> paramMap = new HashMap<String, String>() {{
             put("appid", weChatProperties.getAppid());
             put("secret", weChatProperties.getSecret());
             put("js_code", code);
             put("grant_type", "authorization_code");
         }};
+
+        log.info("调用微信接口，appid={}", weChatProperties.getAppid());
         String s = HttpClientUtil.doGet(WX_LOGIN, paramMap);
-        // 2. 获取响应参数 openid
+        log.info("微信接口返回：{}", s);  // ← 部署后看这行日志，问题就清楚了
+
+        if (s == null || s.isEmpty()) {
+            throw new LoginFailedException("微信服务暂时不可用");
+        }
+
         JSONObject jsonObject = JSON.parseObject(s);
-        return jsonObject.getString("openid");
+        if (jsonObject == null) {
+            throw new LoginFailedException("微信服务响应异常");
+        }
+
+        String openid = jsonObject.getString("openid");
+        if (openid == null) {
+            log.error("微信接口返回错误：{}", s);  // 会打印 errcode 和 errmsg
+            throw new LoginFailedException(MessageConstant.LOGIN_FAILED);
+        }
+
+        return openid;
     }
 
     /**
@@ -65,7 +83,7 @@ public class UserServiceImpl implements UserService {
     public User login(UserLoginDTO userLoginDTO) {
         // 调用类内私有方法，获取openid，并检验其合法性
         String openid = getOpenid(userLoginDTO.getCode());
-        if (openid == null && "".equals(openid)) {
+        if (openid == null || openid.isEmpty()) {
             throw new LoginFailedException(MessageConstant.LOGIN_FAILED);
         }
         // 3. 查数据库有没有该用户
