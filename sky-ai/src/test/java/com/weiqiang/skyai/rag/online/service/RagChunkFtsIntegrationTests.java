@@ -79,6 +79,21 @@ class RagChunkFtsIntegrationTests {
     }
 
     @Test
+    void keywordSearchSkipsInactiveDocuments(JdbcTemplate jdbcTemplate, KeywordRetrievalService keywordRetrievalService) {
+        insertChunk(jdbcTemplate, "doc-1", "chunk-1", "hash-1",
+                "Learning guide", "The model learned from examples.", 0);
+        insertChunk(jdbcTemplate, "doc-2", "chunk-2", "hash-2",
+                "Learning notes", "Learning learning learning is repeated here.", 1);
+        jdbcTemplate.update("update rag_document set active = false where document_id = ?", "doc-2");
+
+        List<com.weiqiang.skyai.rag.online.model.RetrievedChunk> candidates =
+                keywordRetrievalService.retrieveCandidates("learning");
+
+        assertEquals(1, candidates.size());
+        assertEquals("Learning guide", candidates.get(0).metadata().get("title"));
+    }
+
+    @Test
     void hybridMergeKeepsFtsAndVectorCandidatesOrdered(JdbcTemplate jdbcTemplate,
                                                       MutableVectorStoreStub vectorStore,
                                                       CandidateRetrievalService candidateRetrievalService) {
@@ -110,8 +125,8 @@ class RagChunkFtsIntegrationTests {
     private void insertChunk(JdbcTemplate jdbcTemplate, String documentId, String chunkId, String chunkHash,
                              String title, String content, int chunkIndex) {
         jdbcTemplate.update("""
-                        insert into rag_document(document_id, source_name, document_type, index_version, content_hash, status, chunk_count)
-                        values (?, ?, ?, ?, ?, ?, ?)
+                        insert into rag_document(document_id, source_name, document_type, index_version, content_hash, status, active, chunk_count)
+                        values (?, ?, ?, ?, ?, ?, true, ?)
                         on conflict (document_id) do nothing
                         """,
                 documentId, title, "TXT", "v-test", "content-" + documentId, "INDEXED", 1);

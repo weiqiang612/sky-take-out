@@ -32,9 +32,19 @@ public class KeywordRetrievalService {
             return List.of();
         }
 
+        List<String> activeDocumentIds = repository.findActiveDocumentIds();
+        if (activeDocumentIds.isEmpty()) {
+            log.info("在线检索关键词召回跳过，当前没有可用文档，query={}", query);
+            return List.of();
+        }
+
         List<KeywordSearchResult> results = repository.searchChunksByKeyword(query, config.getTopK());
+        Set<String> activeDocumentIdSet = new LinkedHashSet<>(activeDocumentIds);
         List<RetrievedChunk> candidates = new ArrayList<>(results.size());
         for (KeywordSearchResult result : results) {
+            if (!isActiveDocument(result, activeDocumentIdSet)) {
+                continue;
+            }
             Map<String, Object> metadata = new LinkedHashMap<>(result.metadata());
             metadata.put("retrievalSources", List.of("keyword"));
             metadata.put("keywordScore", result.score());
@@ -51,5 +61,10 @@ public class KeywordRetrievalService {
         }
         log.info("在线检索关键词召回完成，query={}，候选数={}", query, candidates.size());
         return candidates;
+    }
+
+    private boolean isActiveDocument(KeywordSearchResult result, Set<String> activeDocumentIds) {
+        Object documentId = result.metadata().get("documentId");
+        return documentId != null && activeDocumentIds.contains(documentId.toString());
     }
 }

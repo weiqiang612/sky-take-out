@@ -17,6 +17,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -51,6 +52,7 @@ public class RagIndexRepository implements KeywordChunkRepository {
                     index_version varchar(64) not null,
                     content_hash varchar(64),
                     status varchar(32) not null,
+                    active boolean not null default true,
                     chunk_count int not null default 0,
                     created_at timestamptz not null default now(),
                     updated_at timestamptz not null default now()
@@ -59,6 +61,10 @@ public class RagIndexRepository implements KeywordChunkRepository {
         jdbcTemplate.execute("""
                 alter table rag_document
                 add column if not exists content_hash varchar(64)
+                """);
+        jdbcTemplate.execute("""
+                alter table rag_document
+                add column if not exists active boolean not null default true
                 """);
         jdbcTemplate.execute("""
                 create unique index if not exists ux_rag_document_content_hash
@@ -120,21 +126,130 @@ public class RagIndexRepository implements KeywordChunkRepository {
     public boolean saveDocumentIfAbsent(String documentId, String sourceName, DocumentType documentType,
                                         String indexVersion, String contentHash, int chunkCount, String status) {
         return jdbcTemplate.update("""
-                insert into rag_document(document_id, source_name, document_type, index_version, content_hash, status, chunk_count)
-                values (?, ?, ?, ?, ?, ?, ?)
+                insert into rag_document(document_id, source_name, document_type, index_version, content_hash, status, active, chunk_count)
+                values (?, ?, ?, ?, ?, ?, true, ?)
                 on conflict(content_hash) do nothing
                 """, documentId, sourceName, documentType.name(), indexVersion, contentHash, status, chunkCount) == 1;
     }
 
     public Optional<RagDocumentSummary> findDocumentByContentHash(String contentHash) {
         List<RagDocumentSummary> documents = jdbcTemplate.query("""
-                select document_id, source_name, document_type, index_version, status, chunk_count, created_at, updated_at
+                select document_id, source_name, document_type, index_version, status, active, chunk_count, created_at, updated_at
                 from rag_document
                 where content_hash = ?
                 order by created_at desc
                 limit 1
                 """, this::mapDocument, contentHash);
         return documents.stream().findFirst();
+    }
+
+    public List<RagDocumentSummary> findDocumentsByIds(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = placeholders(documentIds.size());
+        Object[] args = documentIds.toArray();
+        return jdbcTemplate.query("""
+                select document_id, source_name, document_type, index_version, status, active, chunk_count, created_at, updated_at
+                from rag_document
+                where document_id in (%s)
+                order by created_at desc
+                """.formatted(placeholders), this::mapDocument, args);
+    }
+
+    public List<String> findActiveDocumentIds() {
+        return jdbcTemplate.query("""
+                select document_id
+                from rag_document
+                where active = true
+                order by created_at asc
+                """, (rs, rowNum) -> rs.getString("document_id"));
+    }
+
+    public List<String> findActiveDocumentIdsByIds(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = placeholders(documentIds.size());
+        Object[] args = documentIds.toArray();
+        return jdbcTemplate.query("""
+                select document_id
+                from rag_document
+                where active = true
+                  and document_id in (%s)
+                order by created_at asc
+                """.formatted(placeholders), (rs, rowNum) -> rs.getString("document_id"), args);
+    }
+
+    public List<String> findVectorStoreIdsByDocumentIds(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = placeholders(documentIds.size());
+        Object[] args = documentIds.toArray();
+        return jdbcTemplate.query("""
+                select vector_store_id
+                from rag_chunk
+                where document_id in (%s)
+                """.formatted(placeholders), (rs, rowNum) -> rs.getString("vector_store_id"), args);
+    }
+
+    public int deactivateDocuments(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = placeholders(documentIds.size());
+        List<Object> args = new ArrayList<>();
+        args.add("DISABLED");
+        args.addAll(documentIds);
+        return jdbcTemplate.update("""
+                update rag_document
+                set active = false,
+                    status = ?,
+                    updated_at = now()
+                where document_id in (%s)
+                  and active = true
+                """.formatted(placeholders), args.toArray());
+    }
+
+    public int activateDocuments(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = placeholders(documentIds.size());
+        List<Object> args = new ArrayList<>();
+        args.add("INDEXED");
+        args.addAll(documentIds);
+        return jdbcTemplate.update("""
+                update rag_document
+                set active = true,
+                    status = ?,
+                    updated_at = now()
+                where document_id in (%s)
+                  and active = false
+                """.formatted(placeholders), args.toArray());
+    }
+
+    public int deleteChunksByDocumentIds(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = placeholders(documentIds.size());
+        return jdbcTemplate.update("""
+                delete from rag_chunk
+                where document_id in (%s)
+                """.formatted(placeholders), documentIds.toArray());
+    }
+
+    public int deleteDocumentsByIds(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = placeholders(documentIds.size());
+        return jdbcTemplate.update("""
+                delete from rag_document
+                where document_id in (%s)
+                """.formatted(placeholders), documentIds.toArray());
     }
 
     public void updateDocumentStatus(String documentId, int chunkCount, String status) {
@@ -161,7 +276,7 @@ public class RagIndexRepository implements KeywordChunkRepository {
 
     public List<RagDocumentSummary> findDocuments() {
         return jdbcTemplate.query("""
-                select document_id, source_name, document_type, index_version, status, chunk_count, created_at, updated_at
+                select document_id, source_name, document_type, index_version, status, active, chunk_count, created_at, updated_at
                 from rag_document
                 order by created_at desc
                 """, this::mapDocument);
@@ -184,14 +299,16 @@ public class RagIndexRepository implements KeywordChunkRepository {
     @Deprecated
     public List<KeywordSearchResult> searchChunksByKeywordLike(String query, int topK) {
         List<KeywordSearchResult> ranked = jdbcTemplate.query("""
-                select content, metadata_json, ts_rank(
-                    to_tsvector('simple', coalesce((metadata_json::jsonb ->> 'title'), '') || ' ' || content),
+                select c.content, c.metadata_json, ts_rank(
+                    to_tsvector('simple', coalesce((c.metadata_json::jsonb ->> 'title'), '') || ' ' || c.content),
                     plainto_tsquery('simple', ?)
                 ) as score
-                from rag_chunk
-                where to_tsvector('simple', coalesce((metadata_json::jsonb ->> 'title'), '') || ' ' || content)
+                from rag_chunk c
+                join rag_document d on d.document_id = c.document_id
+                where d.active = true
+                  and to_tsvector('simple', coalesce((c.metadata_json::jsonb ->> 'title'), '') || ' ' || c.content)
                     @@ plainto_tsquery('simple', ?)
-                order by score desc, created_at desc
+                order by score desc, c.created_at desc
                 limit ?
                 """, this::mapKeywordSearchResult, query, query, topK);
         if (!ranked.isEmpty()) {
@@ -199,6 +316,9 @@ public class RagIndexRepository implements KeywordChunkRepository {
         }
 
         List<String> keywords = extractKeywords(query);
+        if (keywords.isEmpty()) {
+            return List.of();
+        }
         String whereClause = String.join(" or ", keywords.stream()
                 .map(ignored -> "coalesce((metadata_json::jsonb ->> 'title'), '') ilike ? escape '\\' or content ilike ? escape '\\'")
                 .toList());
@@ -210,10 +330,12 @@ public class RagIndexRepository implements KeywordChunkRepository {
         }
         args.add(topK);
         return jdbcTemplate.query("""
-                select content, metadata_json, 1.0 as score
-                from rag_chunk
+                select c.content, c.metadata_json, 1.0 as score
+                from rag_chunk c
+                join rag_document d on d.document_id = c.document_id
                 where %s
-                order by created_at desc
+                  and d.active = true
+                order by c.created_at desc
                 limit ?
                 """.formatted(whereClause), this::mapKeywordSearchResult, args.toArray());
     }
@@ -241,6 +363,7 @@ public class RagIndexRepository implements KeywordChunkRepository {
                 DocumentType.valueOf(rs.getString("document_type")),
                 rs.getString("index_version"),
                 rs.getString("status"),
+                rs.getBoolean("active"),
                 rs.getInt("chunk_count"),
                 rs.getObject("created_at", OffsetDateTime.class),
                 rs.getObject("updated_at", OffsetDateTime.class)
@@ -293,5 +416,9 @@ public class RagIndexRepository implements KeywordChunkRepository {
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Failed to serialize chunk metadata: " + chunk.chunkId(), ex);
         }
+    }
+
+    private String placeholders(int size) {
+        return String.join(",", Collections.nCopies(size, "?"));
     }
 }

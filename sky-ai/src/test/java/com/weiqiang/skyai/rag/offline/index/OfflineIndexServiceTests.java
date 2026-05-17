@@ -263,6 +263,7 @@ class OfflineIndexServiceTests {
                     documentType,
                     indexVersion,
                     status,
+                    true,
                     chunkCount,
                     OffsetDateTime.now(),
                     OffsetDateTime.now()
@@ -296,6 +297,7 @@ class OfflineIndexServiceTests {
                     existing.documentType(),
                     existing.indexVersion(),
                     status,
+                    existing.active(),
                     chunkCount,
                     existing.createdAt(),
                     OffsetDateTime.now()

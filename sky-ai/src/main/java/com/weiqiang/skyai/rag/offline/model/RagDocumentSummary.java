@@ -9,6 +9,7 @@ import java.time.OffsetDateTime;
  * @param documentType
  * @param indexVersion
  * @param status
+ * @param active
  * @param chunkCount
  * @param createdAt
  * @param updatedAt
@@ -19,6 +20,7 @@ public record RagDocumentSummary(
         DocumentType documentType,
         String indexVersion,
         String status,
+        boolean active,
         int chunkCount,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt

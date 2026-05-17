@@ -9,11 +9,16 @@ import java.util.List;
 class MutableKeywordChunkRepositoryStub implements KeywordChunkRepository {
 
     private List<KeywordSearchResult> results = List.of();
+    private List<String> activeDocumentIds = List.of();
     private String lastQuery;
     private int lastTopK;
 
     void setResults(List<KeywordSearchResult> results) {
         this.results = new ArrayList<>(results);
+    }
+
+    void setActiveDocumentIds(List<String> activeDocumentIds) {
+        this.activeDocumentIds = new ArrayList<>(activeDocumentIds);
     }
 
     String getLastQuery() {
@@ -29,5 +34,10 @@ class MutableKeywordChunkRepositoryStub implements KeywordChunkRepository {
         this.lastQuery = query;
         this.lastTopK = topK;
         return new ArrayList<>(results.stream().limit(topK).toList());
+    }
+
+    @Override
+    public List<String> findActiveDocumentIds() {
+        return new ArrayList<>(activeDocumentIds);
     }
 }

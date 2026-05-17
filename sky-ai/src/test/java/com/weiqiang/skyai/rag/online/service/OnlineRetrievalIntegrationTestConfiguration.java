@@ -47,7 +47,7 @@ class OnlineRetrievalIntegrationTestConfiguration {
     }
 
     @Bean
-    MutableKeywordChunkRepositoryStub keywordChunkRepository() {
-        return new MutableKeywordChunkRepositoryStub();
+    MutableRagIndexRepositoryStub ragIndexRepository() {
+        return new MutableRagIndexRepositoryStub();
     }
 }

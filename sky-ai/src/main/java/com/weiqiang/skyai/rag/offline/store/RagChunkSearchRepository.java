@@ -12,12 +12,15 @@ public interface RagChunkSearchRepository extends JpaRepository<RagChunkEntity, 
 
     @Query(value = """
             select
-                content as content,
-                metadata_json as metadataJson,
-                ts_rank(fts, tsq) as score
-            from rag_chunk, websearch_to_tsquery('simple', :queryTerms) tsq
-            where fts @@ tsq
-            order by score desc, created_at desc
+                c.content as content,
+                c.metadata_json as metadataJson,
+                ts_rank(c.fts, tsq) as score
+            from rag_chunk c
+            join rag_document d on d.document_id = c.document_id
+            cross join websearch_to_tsquery('simple', :queryTerms) tsq
+            where d.active = true
+              and c.fts @@ tsq
+            order by score desc, c.created_at desc
             limit :topK
             """, nativeQuery = true)
     List<RagChunkSearchProjection> searchByFts(@Param("queryTerms") String queryTerms, @Param("topK") int topK);

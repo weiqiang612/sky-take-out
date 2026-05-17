@@ -41,6 +41,11 @@ class OnlineRetrievalUnitTestConfiguration {
     }
 
     @Bean
+    MutableRagIndexRepositoryStub ragIndexRepository() {
+        return new MutableRagIndexRepositoryStub();
+    }
+
+    @Bean
     MutableRerankerClientStub rerankerClient() {
         return new MutableRerankerClientStub();
     }

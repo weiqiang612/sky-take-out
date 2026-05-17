@@ -35,9 +35,12 @@ class OnlineRetrievalServiceIntegrationTests {
 
             MutableVectorStoreStub vectorStoreStub = context.getBean(MutableVectorStoreStub.class);
             vectorStoreStub.setSearchResults(List.of(
-                    Document.builder().text("chunk-a").metadata(Map.of("source", "doc-a")).score(0.81d).build(),
-                    Document.builder().text("chunk-b").metadata(Map.of("source", "doc-b")).score(0.73d).build()
+                    Document.builder().text("chunk-a").metadata(Map.of("documentId", "doc-a", "source", "doc-a")).score(0.81d).build(),
+                    Document.builder().text("chunk-b").metadata(Map.of("documentId", "doc-b", "source", "doc-b")).score(0.73d).build()
             ));
+
+            MutableRagIndexRepositoryStub ragIndexRepository = context.getBean(MutableRagIndexRepositoryStub.class);
+            ragIndexRepository.setActiveDocumentIds(List.of("doc-a", "doc-b"));
 
             RestClient.Builder restClientBuilder = context.getBean(RestClient.Builder.class);
             MockRestServiceServer server = MockRestServiceServer.bindTo(restClientBuilder).build();
@@ -104,15 +107,17 @@ class OnlineRetrievalServiceIntegrationTests {
 
             MutableVectorStoreStub vectorStoreStub = context.getBean(MutableVectorStoreStub.class);
             vectorStoreStub.setSearchResults("callback", List.of(
-                    Document.builder().text("vector original").metadata(Map.of("chunkHash", "hash-vector")).score(0.91d).build()
+                    Document.builder().text("vector original").metadata(Map.of("chunkHash", "hash-vector", "documentId", "doc-vector")).score(0.91d).build()
             ));
             vectorStoreStub.setSearchResults("callback 支付回调", List.of(
-                    Document.builder().text("vector expanded").metadata(Map.of("chunkHash", "hash-expanded")).score(0.87d).build()
+                    Document.builder().text("vector expanded").metadata(Map.of("chunkHash", "hash-expanded", "documentId", "doc-expanded")).score(0.87d).build()
             ));
 
-            MutableKeywordChunkRepositoryStub keywordRepository = context.getBean(MutableKeywordChunkRepositoryStub.class);
-            keywordRepository.setResults(List.of(
-                    new KeywordSearchResult("keyword exact", Map.of("chunkHash", "hash-keyword"), 4.0d)
+            MutableRagIndexRepositoryStub ragIndexRepository = context.getBean(MutableRagIndexRepositoryStub.class);
+            ragIndexRepository.setActiveDocumentIds(List.of("doc-vector", "doc-expanded", "doc-keyword"));
+
+            ragIndexRepository.setKeywordResults(List.of(
+                    new KeywordSearchResult("keyword exact", Map.of("chunkHash", "hash-keyword", "documentId", "doc-keyword"), 4.0d)
             ));
 
             RestClient.Builder restClientBuilder = context.getBean(RestClient.Builder.class);
