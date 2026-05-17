@@ -5,12 +5,13 @@ WORKDIR /workspace
 # The workflow builds the module first, so this stage only stages the packaged jar.
 COPY target/*-SNAPSHOT.jar app.jar
 
-FROM eclipse-temurin:8-jre-alpine
+FROM eclipse-temurin:8-jre
 
 WORKDIR /app
 
 # Keep the heap capped so two JVMs can coexist on the 2 GB host.
-ENV JAVA_OPTS="-Xms256m -Xmx512m"
+ENV JAVA_OPTS="-Xms256m -Xmx512m -Dhttps.protocols=TLSv1.2,TLSv1.3 -Djdk.tls.client.protocols=TLSv1.2,TLSv1.3"
+
 
 COPY --from=build /workspace/app.jar app.jar
 
