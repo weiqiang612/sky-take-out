@@ -8,6 +8,8 @@ import com.weiqiang.skyai.rag.offline.model.OfflineIndexResponse;
 import com.weiqiang.skyai.rag.offline.model.ParsedDocument;
 import com.weiqiang.skyai.rag.offline.model.RagChunk;
 import com.weiqiang.skyai.rag.offline.model.RagDocumentSummary;
+import com.weiqiang.skyai.rag.offline.exception.OfflineIndexProcessingException;
+import com.weiqiang.skyai.rag.offline.exception.UnsupportedOfflineDocumentTypeException;
 import com.weiqiang.skyai.rag.offline.parse.DocumentParser;
 import com.weiqiang.skyai.rag.offline.store.RagIndexRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +20,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -52,31 +55,32 @@ public class OfflineIndexService {
     @Value("${spring.ai.ollama.embedding.options.model:${spring.ai.openai.embedding.options.model:unknown}}")
     private String embeddingModelName;
 
+    @Transactional(rollbackFor = Exception.class)
     public OfflineIndexResponse index(MultipartFile file, String documentTypeValue) {
-        // 1. 先解析文档，基于解析后的正文计算去重指纹
-        DocumentType explicitType = DocumentType.fromNullable(documentTypeValue);
-        String documentId = UUID.randomUUID().toString();
-        String indexVersion = nextVersion();
-        ParsedDocument document = documentParser.parse(file, explicitType, documentId, indexVersion);
-        String contentHash = sha256Hex(normalizeContent(document.content()));
-
-        RagDocumentSummary existingDocument = repository.findDocumentByContentHash(contentHash).orElse(null);
-        if (existingDocument != null) {
-            return toDuplicateResponse(existingDocument);
-        }
-
-        boolean inserted = repository.saveDocumentIfAbsent(documentId, document.sourceName(), document.documentType(),
-                indexVersion, contentHash, 0, "PROCESSING");
-        if (!inserted) {
-            RagDocumentSummary existing = repository.findDocumentByContentHash(contentHash)
-                    .orElseThrow(() -> new IllegalStateException("Duplicate document detected but no record found: "
-                            + document.sourceName()));
-            return toDuplicateResponse(existing);
-        }
-
-        // 2. 根据文档类型选择解析和分块策略
-        ChunkingStrategy strategy = strategyRegistry.get(document.documentType());
         try {
+            // 1. 先解析文档，基于解析后的正文计算去重指纹
+            DocumentType explicitType = resolveDocumentType(file, documentTypeValue);
+            String documentId = UUID.randomUUID().toString();
+            String indexVersion = nextVersion();
+            ParsedDocument document = documentParser.parse(file, explicitType, documentId, indexVersion);
+            String contentHash = sha256Hex(normalizeContent(document.content()));
+
+            RagDocumentSummary existingDocument = repository.findDocumentByContentHash(contentHash).orElse(null);
+            if (existingDocument != null) {
+                return toDuplicateResponse(existingDocument);
+            }
+
+            boolean inserted = repository.saveDocumentIfAbsent(documentId, document.sourceName(), document.documentType(),
+                    indexVersion, contentHash, 0, "PROCESSING");
+            if (!inserted) {
+                RagDocumentSummary existing = repository.findDocumentByContentHash(contentHash)
+                        .orElseThrow(() -> new IllegalStateException("Duplicate document detected but no record found: "
+                                + document.sourceName()));
+                return toDuplicateResponse(existing);
+            }
+
+            // 2. 根据文档类型选择解析和分块策略
+            ChunkingStrategy strategy = strategyRegistry.get(document.documentType());
             // 3. 分块、嵌入
             List<RagChunk> chunks = strategy.chunk(document);
             List<EmbeddedRagChunk> embeddedChunks = filterAndEmbed(chunks);
@@ -97,10 +101,30 @@ public class OfflineIndexService {
             // 5. 返回索引结果
             return new OfflineIndexResponse(documentId, indexVersion, document.documentType(), document.sourceName(),
                     embeddedChunks.size(), "INDEXED");
-        } catch (RuntimeException ex) {
-            repository.updateDocumentStatus(documentId, 0, "FAILED");
+        } catch (UnsupportedOfflineDocumentTypeException ex) {
             throw ex;
+        } catch (RuntimeException ex) {
+            throw new OfflineIndexProcessingException("离线索引失败，请检查文件内容后重试", ex);
         }
+    }
+
+    private DocumentType resolveDocumentType(MultipartFile file, String documentTypeValue) {
+        if (documentTypeValue != null && !documentTypeValue.isBlank()) {
+            try {
+                return DocumentType.fromNullable(documentTypeValue);
+            } catch (IllegalArgumentException ex) {
+                throw new UnsupportedOfflineDocumentTypeException(resolveSourceName(file), ex);
+            }
+        }
+        DocumentType inferred = DocumentType.infer(resolveSourceName(file));
+        if (inferred == null) {
+            throw new UnsupportedOfflineDocumentTypeException(resolveSourceName(file));
+        }
+        return inferred;
+    }
+
+    private String resolveSourceName(MultipartFile file) {
+        return file.getOriginalFilename() == null ? "uploaded-document" : file.getOriginalFilename();
     }
 
     private String nextVersion() {

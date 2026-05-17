@@ -11,6 +11,8 @@ import com.weiqiang.skyai.rag.offline.model.OfflineIndexResponse;
 import com.weiqiang.skyai.rag.offline.parse.DocumentParser;
 import com.weiqiang.skyai.rag.offline.store.RagIndexRepository;
 import com.weiqiang.skyai.rag.offline.model.RagDocumentSummary;
+import com.weiqiang.skyai.rag.offline.exception.OfflineIndexProcessingException;
+import com.weiqiang.skyai.rag.offline.exception.UnsupportedOfflineDocumentTypeException;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingRequest;
@@ -21,6 +23,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
@@ -35,6 +38,8 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OfflineIndexServiceTests {
@@ -133,6 +138,45 @@ class OfflineIndexServiceTests {
 
         assertFalse(methods.contains("loadJsonl"));
         assertTrue(methods.contains("index"));
+    }
+
+    @Test
+    void indexMethodIsTransactional() throws NoSuchMethodException {
+        assertTrue(OfflineIndexService.class
+                .getDeclaredMethod("index", org.springframework.web.multipart.MultipartFile.class, String.class)
+                .isAnnotationPresent(Transactional.class));
+    }
+
+    @Test
+    void unsupportedDocumentTypeFailsFastWithFriendlyMessage() {
+        OfflineIndexService service = newService(new FakeEmbeddingModel(), new FakeVectorStore(), new FakeRagIndexRepository());
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "archive.zip", "application/zip", "binary".getBytes(StandardCharsets.UTF_8));
+
+        UnsupportedOfflineDocumentTypeException ex = assertThrows(UnsupportedOfflineDocumentTypeException.class,
+                () -> service.index(file, null));
+
+        assertTrue(ex.getMessage().contains("不支持"));
+        assertTrue(ex.getMessage().contains("archive.zip"));
+    }
+
+    @Test
+    void processingFailureIsWrappedWithFriendlyMessage() {
+        FakeEmbeddingModel embeddingModel = new FakeEmbeddingModel() {
+            @Override
+            public List<float[]> embed(List<String> texts) {
+                throw new IllegalStateException("boom");
+            }
+        };
+        OfflineIndexService service = newService(embeddingModel, new FakeVectorStore(), new FakeRagIndexRepository());
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "demo.txt", "text/plain", "hello offline rag".getBytes(StandardCharsets.UTF_8));
+
+        OfflineIndexProcessingException ex = assertThrows(OfflineIndexProcessingException.class,
+                () -> service.index(file, null));
+
+        assertEquals("离线索引失败，请检查文件内容后重试", ex.getMessage());
+        assertInstanceOf(IllegalStateException.class, ex.getCause());
     }
 
     private static class FakeEmbeddingModel implements EmbeddingModel {

@@ -8,7 +8,7 @@ import java.util.Locale;
  * - QA类型适用于结构化的问答数据，通常以JSONL或QA后缀的文件形式存在，每行表示一个问题和答案的对。
  * - Markdown类型适用于以Markdown格式编写的文档，支持.md或.markdown后缀的文件。
  * - PDF类型适用于以PDF格式存在的文档，后缀为.pdf。
- * - TXT类型适用于其他文本格式的文档，作为默认类型使用。
+ * - TXT类型适用于纯文本格式的文档，后缀为.txt。
  * <p>
  */
 public enum DocumentType {
@@ -35,6 +35,9 @@ public enum DocumentType {
         if (lower.endsWith(".pdf")) {
             return PDF;
         }
-        return TXT;
+        if (lower.endsWith(".txt")) {
+            return TXT;
+        }
+        return null;
     }
 }
