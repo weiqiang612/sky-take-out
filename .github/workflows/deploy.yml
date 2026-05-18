@@ -147,6 +147,9 @@ jobs:
               --restart unless-stopped \
               --network app-net \
               -p 8080:8080 \
+              -v /etc/localtime:/etc/localtime:ro \
+              -v /etc/timezone:/etc/timezone:ro \
+              -e TZ=Asia/Shanghai \
               -e SPRING_PROFILES_ACTIVE=prod \
               -e DB_HOST=mysql \
               -e DB_PORT=3306 \
@@ -180,6 +183,9 @@ jobs:
               --restart unless-stopped \
               --network app-net \
               -p 8081:8081 \
+              -v /etc/localtime:/etc/localtime:ro \
+              -v /etc/timezone:/etc/timezone:ro \
+              -e TZ=Asia/Shanghai \
               -e SPRING_PROFILES_ACTIVE=prod \
               -e SERVER_PORT=8081 \
               -e BUSINESS_SERVICE_URL=http://business:8080 \
