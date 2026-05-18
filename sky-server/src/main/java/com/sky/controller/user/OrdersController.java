@@ -7,6 +7,7 @@ import com.sky.dto.OrdersPaymentDTO;
 import com.sky.dto.OrdersSubmitDTO;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
+import com.sky.controller.notify.PayNotifyController;
 import com.sky.service.OrdersService;
 import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderSubmitVO;
@@ -31,6 +32,9 @@ public class OrdersController {
 
     @Autowired
     private OrdersService ordersService;
+
+    @Autowired
+    private PayNotifyController payNotifyController;
 
 
     /**
@@ -68,6 +72,11 @@ public class OrdersController {
         vo.setPackageStr("prepay_id=mock_wx20260321" + System.currentTimeMillis()); // 模拟prepay_id
 
         log.info("生成预支付交易单：{}", vo);
+
+        // 直接模拟微信支付成功回调，跳过真实微信支付流程
+        payNotifyController.mockPaySuccess(ordersPaymentDTO.getOrderNumber());
+        log.info("已直接触发模拟支付回调，订单号：{}", ordersPaymentDTO.getOrderNumber());
+
         return Result.success(vo);
     }
 

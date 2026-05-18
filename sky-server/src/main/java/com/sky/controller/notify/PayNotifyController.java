@@ -3,7 +3,6 @@ package com.sky.controller.notify;
 import com.alibaba.druid.support.json.JSONUtils;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.sky.context.BaseContext;
 import com.sky.properties.WeChatProperties;
 import com.sky.service.OrdersService;
 import com.sky.websocket.WebSocketServer;
@@ -32,6 +31,18 @@ public class PayNotifyController {
     @Autowired
     private WeChatProperties weChatProperties;
 
+    /**
+     * 模拟微信支付回调，直接触发订单支付成功逻辑
+     *
+     * @param outTradeNo 商户订单号
+     */
+    public void mockPaySuccess(String outTradeNo) {
+        log.info("模拟微信支付回调，订单号：{}", outTradeNo);
+        if (outTradeNo != null) {
+            ordersService.paySuccess(outTradeNo);
+        }
+    }
+
 
     /**
      * 支付成功回调
@@ -43,42 +54,45 @@ public class PayNotifyController {
         //读取数据
         String body = readData(request);
         log.info("支付成功回调：{}", body);
-
-        // 准备跳过解密，直接拿订单号，用于测试环境
-        String outTradeNo;
-        JSONObject bodyJson = JSON.parseObject(body);
-
-        // 真实微信回调必带 resource 字段，这里供测试使用
-        if (!bodyJson.containsKey("resource")) {
-            log.info("检测到模拟支付请求，跳过解密环节...");
-            // 直接从 body 拿订单号
-            outTradeNo = bodyJson.getString("out_trade_no");
-        } else {
-            // 3. 走原有的微信解密逻辑（由于你没有证书，这里平时运行会报错，建议注释或保留供研究）
-            log.info("检测到微信标准加密请求，尝试解密...");
-            //数据解密
-            try {
-                String plainText = decryptData(body);
-                log.info("解密后的文本：{}", plainText);
-
-                JSONObject jsonObject = JSON.parseObject(plainText);
-                outTradeNo = jsonObject.getString("out_trade_no");//商户平台订单号
-            } catch (Exception e) {
-                log.error("解密失败（可能是因为没有真实的 APIV3 密钥）：{}", e.getMessage());
-                return; // 终止执行
-            }
-        }
-//            String transactionId = jsonObject.getString("transaction_id");//微信支付交易号
-//            log.info("微信支付交易号：{}", transactionId);
-        log.info("商户平台订单号：{}", outTradeNo);
-
-        //业务处理，修改订单状态、来单提醒
+        String outTradeNo = extractOutTradeNo(body);
         if (outTradeNo != null) {
             ordersService.paySuccess(outTradeNo);
         }
 
         // 给微信响应
         responseToWeixin(response);
+    }
+
+    /**
+     * 从回调报文中提取商户订单号
+     *
+     * @param body 回调报文
+     * @return 商户订单号
+     * @throws Exception
+     */
+    private String extractOutTradeNo(String body) throws Exception {
+        // 准备跳过解密，直接拿订单号，用于测试环境
+        JSONObject bodyJson = JSON.parseObject(body);
+
+        // 真实微信回调必带 resource 字段，这里供测试使用
+        if (!bodyJson.containsKey("resource")) {
+            log.info("检测到模拟支付请求，跳过解密环节...");
+            // 直接从 body 拿订单号
+            return bodyJson.getString("out_trade_no");
+        }
+
+        // 走原有的微信解密逻辑
+        log.info("检测到微信标准加密请求，尝试解密...");
+        try {
+            String plainText = decryptData(body);
+            log.info("解密后的文本：{}", plainText);
+
+            JSONObject jsonObject = JSON.parseObject(plainText);
+            return jsonObject.getString("out_trade_no");//商户平台订单号
+        } catch (Exception e) {
+            log.error("解密失败（可能是因为没有真实的 APIV3 密钥）：{}", e.getMessage());
+            return null;
+        }
     }
 
     /**
