@@ -35,6 +35,8 @@ import java.util.concurrent.TimeoutException;
 @Service
 public class AgentChatService {
 
+    private static final String DEFAULT_OTHER_CLARIFICATION = "抱歉，我暂时没法确定你的具体需求。可以补充一下订单号、商品或想处理的事项吗？";
+
     private final ChatClient.Builder chatClientBuilder;
     private final IntentRecognitionAdvisor intentRecognitionAdvisor;
     private final UserContextAdvisor userContextAdvisor;
@@ -107,6 +109,13 @@ public class AgentChatService {
             case CHANGE_ADDRESS -> buildQuestion("Do you want to change the delivery address for order", intentResult);
             default -> "Please confirm this action.";
         };
+    }
+
+    public String otherIntentResponse(IntentRecognitionResult intentResult) {
+        if (intentResult != null && StringUtils.hasText(intentResult.clarificationQuestion())) {
+            return intentResult.clarificationQuestion();
+        }
+        return DEFAULT_OTHER_CLARIFICATION;
     }
 
     public AgentChatConfirmationFrame confirmationFrame(IntentRecognitionResult intentResult) {

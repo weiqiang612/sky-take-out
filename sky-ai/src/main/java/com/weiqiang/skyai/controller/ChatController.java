@@ -1,11 +1,9 @@
 package com.weiqiang.skyai.controller;
 
-import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.websocket.AgentChatService;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -29,11 +27,8 @@ public class ChatController {
                                    @RequestParam(value = "userId", defaultValue = "anonymous") String userId) {
         IntentRecognitionResult preIntent = agentChatService.recognizeIntent(question, conversationId, userId);
 
-        if (preIntent.intent() == IntentType.OTHER
-                && preIntent.confidence() == ConfidenceLevel.LOW
-                && StringUtils.hasText(preIntent.clarificationQuestion())) {
-            agentChatService.writeTurn(userId, conversationId, preIntent);
-            return Map.of("question", question, "answer", preIntent.clarificationQuestion());
+        if (preIntent.intent() == IntentType.OTHER) {
+            return Map.of("question", question, "answer", agentChatService.otherIntentResponse(preIntent));
         }
 
         if (preIntent.requiresHumanConfirmation()) {

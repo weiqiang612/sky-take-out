@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -111,6 +112,38 @@ class AgentChatWebSocketHandlerTests {
         assertEquals("error", objectMapper.readTree(frames.get(0)).path("type").asText());
         assertEquals("本次回复超时了，请稍后重试，或换一种说法再试一次。", objectMapper.readTree(frames.get(0)).path("message").asText());
         assertFalse(activeStreams(handler).containsKey("conv-3"));
+    }
+
+    @Test
+    void otherIntentShouldReturnSafeClarificationWithoutStreaming() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, objectMapper);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+        IntentRecognitionResult intentResult = new IntentRecognitionResult(
+                IntentType.OTHER,
+                ConfidenceLevel.HIGH,
+                Map.of(),
+                List.of(IntentType.OTHER),
+                null,
+                false,
+                null
+        );
+        when(agentChatService.recognizeIntent(eq("hello"), eq("conv-4"), eq("user-1"))).thenReturn(intentResult);
+        when(agentChatService.otherIntentResponse(intentResult)).thenReturn("请补充一下你的具体诉求。");
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-4\",\"userId\":\"user-1\",\"message\":\"hello\"}"));
+
+        assertEquals("token", objectMapper.readTree(frames.get(0)).path("type").asText());
+        assertEquals("请补充一下你的具体诉求。", objectMapper.readTree(frames.get(0)).path("content").asText());
+        assertEquals("done", objectMapper.readTree(frames.get(1)).path("type").asText());
+        assertEquals("other", objectMapper.readTree(frames.get(1)).path("intent").asText());
+        assertFalse(activeStreams(handler).containsKey("conv-4"));
+        assertNull(session.getAttributes().get("activeConversationId"));
+        assertNull(session.getAttributes().get("pendingQuestion"));
+        assertNull(session.getAttributes().get("pendingIntent"));
+        verify(agentChatService, never()).streamChat(any(), any(), any(), any(IntentRecognitionResult.class));
     }
 
     private WebSocketSession mockSession() {

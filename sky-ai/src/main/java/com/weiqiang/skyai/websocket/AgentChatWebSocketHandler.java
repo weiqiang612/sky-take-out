@@ -3,6 +3,7 @@ package com.weiqiang.skyai.websocket;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
+import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.websocket.model.AgentChatCancelledFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatConfirmationFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatDoneFrame;
@@ -84,6 +85,10 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         IntentRecognitionResult preIntent = agentChatService.recognizeIntent(request.message(), conversationId, userId);
+        if (preIntent.intent() == IntentType.OTHER) {
+            sendOtherResponse(session, preIntent);
+            return;
+        }
         if (preIntent.requiresHumanConfirmation()) {
             session.getAttributes().put(PENDING_QUESTION_KEY, request.message());
             session.getAttributes().put(PENDING_INTENT_KEY, preIntent.intent().value());
@@ -199,6 +204,11 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     private void sendToken(WebSocketSession session, String content) {
         send(session, new AgentChatTokenFrame("token", content));
+    }
+
+    private void sendOtherResponse(WebSocketSession session, IntentRecognitionResult intentResult) {
+        sendToken(session, agentChatService.otherIntentResponse(intentResult));
+        sendDone(session, intentResult);
     }
 
     private void sendDone(WebSocketSession session, @Nullable IntentRecognitionResult intentResult) {

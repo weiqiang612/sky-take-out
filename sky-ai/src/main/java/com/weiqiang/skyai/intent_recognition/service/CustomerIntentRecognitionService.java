@@ -54,7 +54,7 @@ public class CustomerIntentRecognitionService {
         String humanConfirmationReason = result.humanConfirmationReason();
         String clarificationQuestion = result.clarificationQuestion();
 
-        if (confidence == ConfidenceLevel.LOW && !StringUtils.hasText(clarificationQuestion)) {
+        if (!StringUtils.hasText(clarificationQuestion) && (confidence == ConfidenceLevel.LOW || intent == IntentType.OTHER)) {
             clarificationQuestion = DEFAULT_CLARIFICATION_QUESTION;
         }
 

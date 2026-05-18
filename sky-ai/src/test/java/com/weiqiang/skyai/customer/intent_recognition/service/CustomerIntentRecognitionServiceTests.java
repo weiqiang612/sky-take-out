@@ -90,6 +90,28 @@ class CustomerIntentRecognitionServiceTests {
     }
 
     @Test
+    void recognizeBuildsClarificationQuestionForOtherIntent() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(CustomerIntentRecognitionTestConfiguration.class)) {
+            MutableCustomerIntentRecognitionClientStub client = context.getBean(MutableCustomerIntentRecognitionClientStub.class);
+            client.setResult(new IntentRecognitionResult(
+                    IntentType.OTHER,
+                    ConfidenceLevel.HIGH,
+                    Map.of(),
+                    List.of(IntentType.OTHER),
+                    null,
+                    false,
+                    null
+            ));
+
+            CustomerIntentRecognitionService service = context.getBean(CustomerIntentRecognitionService.class);
+            IntentRecognitionResult result = service.recognize(new IntentRecognitionRequest("随便看看", List.of()));
+
+            assertEquals(IntentType.OTHER, result.intent());
+            assertEquals("可以补充一下你的具体诉求吗，例如订单号、商品或想处理的事项？", result.clarificationQuestion());
+        }
+    }
+
+    @Test
     void recognizeReturnsFallbackWhenClientReturnsNull() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(CustomerIntentRecognitionTestConfiguration.class)) {
             MutableCustomerIntentRecognitionClientStub client = context.getBean(MutableCustomerIntentRecognitionClientStub.class);
