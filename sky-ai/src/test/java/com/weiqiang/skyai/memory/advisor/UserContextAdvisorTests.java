@@ -1,9 +1,14 @@
 package com.weiqiang.skyai.memory.advisor;
 
 import com.weiqiang.skyai.advisor.UserContextAdvisor;
+import com.weiqiang.skyai.advisor.UserProfileInjectionMetrics;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.memory.config.UserProfileMemoryProperties;
+import com.weiqiang.skyai.memory.model.MemoryFactKey;
+import com.weiqiang.skyai.memory.model.MemoryFactSourceType;
+import com.weiqiang.skyai.memory.model.UserMemoryFact;
 import com.weiqiang.skyai.memory.service.UserMemoryFactService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -19,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -30,7 +36,7 @@ class UserContextAdvisorTests {
 
     @Test
     void allowedToolsIncludesSearchToolsForOrderIntents() {
-        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class));
+        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class), new UserProfileMemoryProperties(), mock(UserProfileInjectionMetrics.class));
         IntentRecognitionResult intentResult = new IntentRecognitionResult(
                 IntentType.ORDER_STATUS,
                 ConfidenceLevel.HIGH,
@@ -51,7 +57,7 @@ class UserContextAdvisorTests {
 
     @Test
     void allowedToolsStayEmptyForFaqAndOther() {
-        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class));
+        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class), new UserProfileMemoryProperties(), mock(UserProfileInjectionMetrics.class));
         IntentRecognitionResult intentResult = new IntentRecognitionResult(
                 IntentType.OTHER,
                 ConfidenceLevel.LOW,
@@ -70,7 +76,7 @@ class UserContextAdvisorTests {
 
     @Test
     void allowedToolsIncludesMenuSearchToolsForCartManagement() {
-        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class));
+        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class), new UserProfileMemoryProperties(), mock(UserProfileInjectionMetrics.class));
         IntentRecognitionResult intentResult = new IntentRecognitionResult(
                 IntentType.CART_MANAGEMENT,
                 ConfidenceLevel.HIGH,
@@ -93,7 +99,7 @@ class UserContextAdvisorTests {
 
     @Test
     void cartManagementContextEncouragesSearchThenDirectExecution() {
-        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class));
+        UserContextAdvisor advisor = new UserContextAdvisor(mock(UserMemoryFactService.class), new UserProfileMemoryProperties(), mock(UserProfileInjectionMetrics.class));
         IntentRecognitionResult intentResult = new IntentRecognitionResult(
                 IntentType.CART_MANAGEMENT,
                 ConfidenceLevel.HIGH,
@@ -114,10 +120,15 @@ class UserContextAdvisorTests {
     }
 
     @Test
-    void faqContextUsesStructuredDietarySummary() {
+    void faqContextUsesStructuredDietaryMemoryBlock() {
         UserMemoryFactService userMemoryFactService = mock(UserMemoryFactService.class);
-        when(userMemoryFactService.dietaryPreferencesSummary("1")).thenReturn("喜欢的菜：平菇豆腐汤；口味偏好：清淡");
-        UserContextAdvisor advisor = new UserContextAdvisor(userMemoryFactService);
+        UserMemoryFact dish = new UserMemoryFact();
+        dish.setFactKey(MemoryFactKey.FAVORITE_DISHES.value());
+        dish.setFactValue("平菇豆腐汤");
+        dish.setSourceType(MemoryFactSourceType.USER_MANUAL);
+        dish.setUpdatedAt(Instant.parse("2026-05-10T00:00:00Z"));
+        when(userMemoryFactService.findFactsSorted("1")).thenReturn(List.of(dish));
+        UserContextAdvisor advisor = new UserContextAdvisor(userMemoryFactService, new UserProfileMemoryProperties(), mock(UserProfileInjectionMetrics.class));
         IntentRecognitionResult intentResult = new IntentRecognitionResult(
                 IntentType.FAQ,
                 ConfidenceLevel.HIGH,
@@ -130,7 +141,7 @@ class UserContextAdvisorTests {
 
         String contextBlock = (String) ReflectionTestUtils.invokeMethod(advisor, "buildContextBlock", intentResult, "1");
 
-        assertTrue(contextBlock.contains("Dietary preferences"));
+        assertTrue(contextBlock.contains("Relevant memory"));
         assertTrue(contextBlock.contains("平菇豆腐汤"));
     }
 
@@ -138,7 +149,7 @@ class UserContextAdvisorTests {
     void adviseStreamPrependsContextBlockToPrompt() {
         UserMemoryFactService userMemoryFactService = mock(UserMemoryFactService.class);
         when(userMemoryFactService.operationalNotesSummary("1")).thenReturn("No known issues.");
-        UserContextAdvisor advisor = new UserContextAdvisor(userMemoryFactService);
+        UserContextAdvisor advisor = new UserContextAdvisor(userMemoryFactService, new UserProfileMemoryProperties(), mock(UserProfileInjectionMetrics.class));
         IntentRecognitionResult intentResult = new IntentRecognitionResult(
                 IntentType.ORDER_STATUS,
                 ConfidenceLevel.HIGH,

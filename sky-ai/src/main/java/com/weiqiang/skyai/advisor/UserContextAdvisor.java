@@ -3,6 +3,10 @@ package com.weiqiang.skyai.advisor;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.memory.config.UserProfileMemoryProperties;
+import com.weiqiang.skyai.memory.model.MemoryFactKey;
+import com.weiqiang.skyai.memory.model.MemoryFactSourceType;
+import com.weiqiang.skyai.memory.model.UserMemoryFact;
 import com.weiqiang.skyai.memory.service.UserMemoryFactService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientRequest;
@@ -19,10 +23,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Advisor for injecting user context into the prompt based on recognized intents and user memory.
@@ -32,9 +38,15 @@ import java.util.Set;
 public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
     private final UserMemoryFactService userMemoryFactService;
+    private final UserProfileMemoryProperties userProfileMemoryProperties;
+    private final UserProfileInjectionMetrics userProfileInjectionMetrics;
 
-    public UserContextAdvisor(UserMemoryFactService userMemoryFactService) {
+    public UserContextAdvisor(UserMemoryFactService userMemoryFactService,
+                              UserProfileMemoryProperties userProfileMemoryProperties,
+                              UserProfileInjectionMetrics userProfileInjectionMetrics) {
         this.userMemoryFactService = userMemoryFactService;
+        this.userProfileMemoryProperties = userProfileMemoryProperties;
+        this.userProfileInjectionMetrics = userProfileInjectionMetrics;
     }
 
     @Override
@@ -55,9 +67,6 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     @Override
     public reactor.core.publisher.Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
         IntentRecognitionResult intentResult = (IntentRecognitionResult) chatClientRequest.context().get("intentResult");
-        log.info("UserContextAdvisor got intentResult: {}", intentResult);  // ← 加这行日志
-        Set<String> tools = allowedTools(intentResult);
-        log.info("Computed allowedTools: {}", tools);  // ← 加这行日志
         chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
         String userId = stringParam(chatClientRequest, "userId");
         String contextBlock = buildContextBlock(intentResult, userId);
@@ -75,51 +84,148 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         return "userContextAdvisor";
     }
 
-    // Ensure this advisor runs early, right after intent recognition, to inject context before other advisors or the model processes the prompt
     @Override
     public int getOrder() {
         return Ordered.HIGHEST_PRECEDENCE + 1;
     }
 
     private String buildContextBlock(IntentRecognitionResult intentResult, String userId) {
-        if (intentResult == null) {
-            intentResult = new IntentRecognitionResult(IntentType.OTHER, ConfidenceLevel.LOW, Map.of(), List.of(), null, false, null);
-        }
-        if (intentResult.intent() == IntentType.OTHER && intentResult.confidence() == ConfidenceLevel.LOW) {
+        IntentType intentType = intentResult == null ? IntentType.OTHER : intentResult.intent();
+        ProfileInjectionLevel profileInjectionLevel = profileInjectionLevel(intentType);
+        String profileText = buildProfileText(userId, profileInjectionLevel);
+        int charsInjected = profileText == null ? 0 : profileText.length();
+
+        if (intentType == IntentType.SHOP_STATUS) {
+            userProfileInjectionMetrics.recordContext(intentType, ProfileInjectionLevel.NONE, false, 0);
             return "";
         }
-        return switch (intentResult.intent()) {
-            case ORDER_STATUS, TRACK_DELIVERY -> memorySentence("Order id", referencedOrderId(intentResult));
-            case CANCEL_ORDER, REQUEST_REFUND -> memorySentence("Known issues", userMemoryFactService.operationalNotesSummary(userId));
-            case REPORT_MISSING_ITEM -> memorySentence("Order id", referencedOrderId(intentResult));
-            case CHANGE_ADDRESS -> memorySentence("Default address", userMemoryFactService.defaultAddressSummary(userId));
-            case MENU_QUERY -> joinSentences(List.of(
-                    memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId)),
-                    sentence("If the user names a dish or setmeal, search the menu first and then act on the unique match directly."),
-                    sentence("Do not ask the user to provide an id when search tools can resolve it."),
-                    sentence("If a unique match is already found, do not repeat the same lookup or re-ask for details.")
-            ));
-            case CART_MANAGEMENT -> joinSentences(List.of(
-                    memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId)),
-                    sentence("The current user may manage their own cart directly."),
-                    sentence("If the user names a dish or setmeal, search the menu first and then add the unique match directly."),
-                    sentence("Do not ask for menu access, do not ask the user to provide an id when search tools can resolve it."),
-                    sentence("If a unique match is already found, do not repeat the same lookup or re-ask for details.")
-            ));
-            case ADDRESS_MANAGEMENT -> joinSentences(List.of(
-                    memorySentence("Default address", userMemoryFactService.defaultAddressSummary(userId)),
-                    sentence("The current user may manage their own saved addresses directly."),
-                    sentence("If the user names an address by consignee, phone, label, or detail, search addresses first and then act on the unique match directly."),
-                    sentence("Do not ask the user to provide an id when search tools can resolve it.")
-            ));
-            case SHOP_STATUS -> sentence("You may check the shop status directly.");
-            case ESCALATE_TO_HUMAN -> joinSentences(List.of(
-                    memorySentence("Order id", referencedOrderId(intentResult)),
-                    memorySentence("Known issues", userMemoryFactService.operationalNotesDetailed(userId))
-            ));
-            case FAQ -> memorySentence("Dietary preferences", userMemoryFactService.dietaryPreferencesSummary(userId));
-            case OTHER -> memorySentence("Default address", userMemoryFactService.defaultAddressSummary(userId));
+
+        List<String> parts = new ArrayList<>();
+        String memoryBlock = buildRelevantMemoryBlock(userId, profileText, profileInjectionLevel, intentResult);
+        if (StringUtils.hasText(memoryBlock)) {
+            parts.add(memoryBlock);
+        }
+
+        switch (intentType) {
+            case ORDER_STATUS, TRACK_DELIVERY -> parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
+            case CANCEL_ORDER, REQUEST_REFUND -> parts.add(sentence("Known issues should be treated as persistent operational memory when present."));
+            case REPORT_MISSING_ITEM -> parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
+            case CHANGE_ADDRESS -> parts.add(sentence("The current user may manage their own saved addresses directly."));
+            case MENU_QUERY -> {
+                parts.add(sentence("If the user names a dish or setmeal, search the menu first and then act on the unique match directly."));
+                parts.add(sentence("Do not ask the user to provide an id when search tools can resolve it."));
+                parts.add(sentence("If a unique match is already found, do not repeat the same lookup or re-ask for details."));
+            }
+            case CART_MANAGEMENT -> {
+                parts.add(sentence("The current user may manage their own cart directly."));
+                parts.add(sentence("If the user names a dish or setmeal, search the menu first and then add the unique match directly."));
+                parts.add(sentence("Do not ask for menu access, do not ask the user to provide an id when search tools can resolve it."));
+                parts.add(sentence("If a unique match is already found, do not repeat the same lookup or re-ask for details."));
+            }
+            case ADDRESS_MANAGEMENT -> {
+                parts.add(sentence("The current user may manage their own saved addresses directly."));
+                parts.add(sentence("If the user names an address by consignee, phone, label, or detail, search addresses first and then act on the unique match directly."));
+                parts.add(sentence("Do not ask the user to provide an id when search tools can resolve it."));
+            }
+            case ESCALATE_TO_HUMAN -> {
+                parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
+            }
+            case FAQ, OTHER -> {
+                // profile memory is already injected through the relevant memory block
+            }
+            case SHOP_STATUS -> {
+                // handled above
+            }
+        }
+
+        String block = joinSentences(parts);
+        boolean profilePresent = StringUtils.hasText(profileText);
+        userProfileInjectionMetrics.recordContext(intentType, profileInjectionLevel, profilePresent, charsInjected);
+        log.debug("user profile context injection intentType={} level={} profilePresent={} charsInjected={}",
+                intentType, profileInjectionLevel, profilePresent, charsInjected);
+        return block;
+    }
+
+    private ProfileInjectionLevel profileInjectionLevel(IntentType intentType) {
+        if (!userProfileMemoryProperties.isEnabled() || intentType == null) {
+            return ProfileInjectionLevel.NONE;
+        }
+        return switch (intentType) {
+            case SHOP_STATUS -> ProfileInjectionLevel.NONE;
+            case ORDER_STATUS, TRACK_DELIVERY, CANCEL_ORDER, REQUEST_REFUND, CHANGE_ADDRESS, ADDRESS_MANAGEMENT, REPORT_MISSING_ITEM, OTHER ->
+                    ProfileInjectionLevel.SUMMARY;
+            case MENU_QUERY, CART_MANAGEMENT, FAQ, ESCALATE_TO_HUMAN -> ProfileInjectionLevel.FULL;
         };
+    }
+
+    private String buildProfileText(String userId, ProfileInjectionLevel profileInjectionLevel) {
+        if (!StringUtils.hasText(userId) || profileInjectionLevel == ProfileInjectionLevel.NONE) {
+            return null;
+        }
+        return switch (profileInjectionLevel) {
+            case SUMMARY -> userMemoryFactService.userProfileNotesSummary(userId);
+            case FULL -> userMemoryFactService.userProfileNotesDetailed(userId);
+            case NONE -> null;
+        };
+    }
+
+    private String buildRelevantMemoryBlock(String userId,
+                                            String profileText,
+                                            ProfileInjectionLevel profileInjectionLevel,
+                                            IntentRecognitionResult intentResult) {
+        if (!StringUtils.hasText(userId)) {
+            return "";
+        }
+        List<String> lines = new ArrayList<>();
+        if (StringUtils.hasText(profileText)) {
+            lines.add(profileLine(profileText));
+        }
+
+        IntentType intentType = intentResult == null ? IntentType.OTHER : intentResult.intent();
+        switch (intentType) {
+            case ORDER_STATUS, TRACK_DELIVERY, REPORT_MISSING_ITEM, ESCALATE_TO_HUMAN -> {
+                // no extra fact lines
+            }
+            case CANCEL_ORDER, REQUEST_REFUND -> addMemoryLines(lines, userId, List.of(MemoryFactKey.OPERATIONAL_NOTES));
+            case CHANGE_ADDRESS, ADDRESS_MANAGEMENT -> addMemoryLines(lines, userId, List.of(MemoryFactKey.DEFAULT_ADDRESS));
+            case MENU_QUERY, CART_MANAGEMENT, FAQ -> addMemoryLines(lines, userId, List.of(
+                    MemoryFactKey.FAVORITE_DISHES,
+                    MemoryFactKey.FAVORITE_FLAVORS,
+                    MemoryFactKey.DIETARY_RESTRICTIONS
+            ));
+            case SHOP_STATUS, OTHER -> {
+                // profile only, if present
+            }
+        }
+
+        if (!lines.isEmpty() && profileInjectionLevel == ProfileInjectionLevel.NONE) {
+            // No profile injection for this intent, but still allow existing relevant memory lines.
+            return "Relevant memory:\n" + String.join("\n", lines);
+        }
+        if (!lines.isEmpty()) {
+            return "Relevant memory:\n" + String.join("\n", lines);
+        }
+        return "";
+    }
+
+    private void addMemoryLines(List<String> lines, String userId, List<MemoryFactKey> factKeys) {
+        if (factKeys == null || factKeys.isEmpty()) {
+            return;
+        }
+        Set<String> keyValues = factKeys.stream().map(MemoryFactKey::value).collect(Collectors.toSet());
+        List<UserMemoryFact> facts = userMemoryFactService.findFactsSorted(userId).stream()
+                .filter(fact -> keyValues.contains(fact.getFactKey()))
+                .toList();
+        for (UserMemoryFact fact : facts) {
+            String line = formatMemoryLine(fact);
+            if (StringUtils.hasText(line)) {
+                lines.add(line);
+            }
+        }
+    }
+
+    private String profileLine(String profileText) {
+        return "- User profile notes: " + profileText.trim();
     }
 
     private Set<String> allowedTools(IntentRecognitionResult intentResult) {
@@ -145,7 +251,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     }
 
     private String referencedOrderId(IntentRecognitionResult intentResult) {
-        String orderId = intentResult.entities() == null ? null : intentResult.entities().get("order_id");
+        String orderId = intentResult == null || intentResult.entities() == null ? null : intentResult.entities().get("order_id");
         return StringUtils.hasText(orderId) ? orderId : "unavailable";
     }
 
@@ -158,8 +264,35 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         return value.endsWith(".") ? value : value + ".";
     }
 
-    private String memorySentence(String label, String value) {
-        return sentence(label + ": " + (StringUtils.hasText(value) ? value.trim() : "unavailable"));
+    private String formatMemoryLine(UserMemoryFact fact) {
+        if (fact == null || !StringUtils.hasText(fact.getFactValue())) {
+            return "";
+        }
+        String label = memoryLabel(fact.getFactKey());
+        String suffix = fact.getSourceType() == MemoryFactSourceType.USER_MANUAL ? " [用户自设]" : "";
+        return "- " + label + ": " + fact.getFactValue().trim() + suffix;
+    }
+
+    private String memoryLabel(String factKey) {
+        if (MemoryFactKey.FAVORITE_DISHES.value().equals(factKey)) {
+            return "Favorite dishes";
+        }
+        if (MemoryFactKey.FAVORITE_FLAVORS.value().equals(factKey)) {
+            return "Favorite flavors";
+        }
+        if (MemoryFactKey.DIETARY_RESTRICTIONS.value().equals(factKey)) {
+            return "Dietary restrictions";
+        }
+        if (MemoryFactKey.DEFAULT_ADDRESS.value().equals(factKey)) {
+            return "Default address";
+        }
+        if (MemoryFactKey.OPERATIONAL_NOTES.value().equals(factKey)) {
+            return "Operational notes";
+        }
+        if (MemoryFactKey.USER_PROFILE_NOTES.value().equals(factKey)) {
+            return "User profile notes";
+        }
+        return factKey;
     }
 
     private String stringParam(ChatClientRequest request, String key) {

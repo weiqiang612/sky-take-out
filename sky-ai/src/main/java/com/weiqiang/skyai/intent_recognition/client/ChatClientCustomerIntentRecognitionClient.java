@@ -31,12 +31,12 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
             4. 所有的实体提取必须严格基于对话内容。
             规则：
             1. 不确定时不要猜，优先返回 other 或最保守意图。
-            2. 有歧义时把候选意图写入 possible_intents ，不要强行只选一个。
-            3. confidence 为 low 时必须给出 clarification_question。
+            2. 有歧义时把候选意图写入 possible_intents，不要强行只选一个。
+            3. confidence 低时必须给出 clarification_question。
             4. cancel_order、request_refund、change_address 这类高风险操作必须标记 requires_human_confirmation=true，并说明原因。
             5. entities 只返回字符串键值对，优先提取 order_id、item_name、address 等业务实体。
             6. 只返回可被 JSON 反序列化的结构化结果，不要输出解释性文本。
-            
+
             可用意图：
             - order_status
             - cancel_order
@@ -51,6 +51,7 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
             - faq
             - escalate_to_human
             - other
+
             ### 正确响应示例：
             {
               "intent": "other",
@@ -61,10 +62,11 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
               "human_confirmation_reason": "",
               "clarification_question": ""
             }
-            
+
             ### 错误响应示例（绝对禁止）：
-            我经过分析认为用户在问名字，结果如下：
-            {"intent": "other"...}
+            - 不要输出省略内容，比如 ...
+            - 不要输出单独的字符串或缺少键的值
+            - 每个字段都必须完整按照 JSON key-value 形式输出
             """;
 
     private final ChatClient.Builder gptChatClient;
@@ -80,21 +82,58 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
                 .content();
         log.debug("AI 原始响应内容: {}", rawResponse);
 
-        // 2. 核心修复逻辑：提取 JSON 部分
-        String jsonContent = extractJson(rawResponse);
+        String jsonContent = repairJsonContent(rawResponse);
 
         try {
-            // 3. 手动使用 Jackson 反序列化，不要再用 BeanOutputConverter 的默认行为
             return objectMapper.readValue(jsonContent, IntentRecognitionResult.class);
         } catch (Exception e) {
             log.error("解析 JSON 失败。处理后的内容: {}", jsonContent, e);
-            // 返回兜底逻辑，防止整个链路崩溃
-            return new IntentRecognitionResult(IntentType.OTHER, ConfidenceLevel.LOW, Map.of(), List.of(), "抱歉，我刚才走神了，您能再详细说一遍吗？", false, null);
+            return new IntentRecognitionResult(
+                    IntentType.OTHER,
+                    ConfidenceLevel.LOW,
+                    Map.of(),
+                    List.of(),
+                    "抱歉，我刚才走神了，您能再详细说一遍吗？",
+                    false,
+                    null
+            );
         }
     }
 
-    private String extractJson(String text) {
+    static String repairJsonContent(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "{}";
+        }
 
+        String candidate = text.replace("```json", "").replace("```", "");
+        String json = extractJson(candidate);
+        if (!StringUtils.hasText(json)) {
+            return "{}";
+        }
+
+        StringBuilder repaired = new StringBuilder();
+        String[] lines = json.split("\\R");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!StringUtils.hasText(trimmed)) {
+                continue;
+            }
+            if (trimmed.equals("{") || trimmed.equals("}") || trimmed.equals("[") || trimmed.equals("]")) {
+                repaired.append(line).append('\n');
+                continue;
+            }
+            if (trimmed.startsWith("\"") && trimmed.endsWith("\",") && !trimmed.contains(":")) {
+                log.warn("修复 AI 输出时移除了未指定键的字符串行: {}", trimmed);
+                continue;
+            }
+            repaired.append(line).append('\n');
+        }
+
+        String normalized = repaired.toString().replaceAll(",\\s*([}\\]])", "$1").trim();
+        return StringUtils.hasText(normalized) ? normalized : "{}";
+    }
+
+    static String extractJson(String text) {
         if (text == null || !text.contains("{")) {
             return "{}";
         }
@@ -110,7 +149,7 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
         return text;
     }
 
-    private String buildUserText(IntentRecognitionRequest request) {
+    static String buildUserText(IntentRecognitionRequest request) {
         StringBuilder builder = new StringBuilder();
         builder.append("message:\n");
         builder.append(StringUtils.hasText(request.message()) ? request.message().trim() : "");

@@ -21,6 +21,10 @@ server:
 skyai:
   sky-server:
     base-url: ${SKY_SERVER_BASE_URL:http://localhost:8080}
+  memory:
+    user-profile:
+      enabled: ${SKY_AI_USER_PROFILE_ENABLED:true}
+      intent-recognition-summary-enabled: ${SKY_AI_USER_PROFILE_INTENT_RECOGNITION_SUMMARY_ENABLED:true}
   retrieval:
     online:
       top-k: ${SKY_AI_RETRIEVAL_TOP_K:80}

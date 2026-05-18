@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.lang.reflect.Field;
+
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -41,5 +43,15 @@ class MemoryWriterServiceTests {
         ReflectionTestUtils.invokeMethod(service, "persistToolOutcome", "u1", IntentType.CANCEL_ORDER, "FAIL: server rejected");
 
         verifyNoInteractions(userMemoryFactService);
+    }
+
+    @Test
+    void extractionPromptMentionsUserManagedFactsAndExplicitStatements() throws Exception {
+        Field field = MemoryWriterService.class.getDeclaredField("EXTRACTION_SYSTEM_PROMPT");
+        field.setAccessible(true);
+        String prompt = (String) field.get(null);
+
+        org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("explicit statements only"));
+        org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("User-managed facts may also be edited or deleted later from the UI"));
     }
 }

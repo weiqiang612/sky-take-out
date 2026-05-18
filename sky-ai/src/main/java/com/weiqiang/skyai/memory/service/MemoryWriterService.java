@@ -34,6 +34,7 @@ public class MemoryWriterService {
             Return JSON only. No markdown, no code fences, no preamble.
             Extract stable user memory facts from the user's explicit statements only.
             Ignore assistant replies and raw tool payloads; confirmed tool outcomes are persisted separately.
+            User-managed facts may also be edited or deleted later from the UI, so only persist what the user explicitly states in this turn.
             Return an object with optional fact entries and optional corrections.
             Each fact field must be omitted when there is no new information, or include {"value": ..., "confidence": 0.0-1.0}.
             A fact entry value may be null to signal that the user wants the fact forgotten.
