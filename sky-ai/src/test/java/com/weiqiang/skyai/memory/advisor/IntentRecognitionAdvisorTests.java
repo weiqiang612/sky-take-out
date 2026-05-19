@@ -7,6 +7,7 @@ import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionRequest;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.intent_recognition.service.CustomerIntentRecognitionService;
 import com.weiqiang.skyai.memory.config.UserProfileMemoryProperties;
 import com.weiqiang.skyai.memory.service.ChatHistoryService;
 import com.weiqiang.skyai.memory.service.UserMemoryFactService;
@@ -33,7 +34,7 @@ class IntentRecognitionAdvisorTests {
 
     @Test
     void adviseCallPrependsProfileSummaryToRecognitionInput() {
-        CustomerIntentRecognitionClient client = mock(CustomerIntentRecognitionClient.class);
+        CustomerIntentRecognitionService client = mock(CustomerIntentRecognitionService.class);
         ChatHistoryService chatHistoryService = mock(ChatHistoryService.class);
         UserMemoryFactService userMemoryFactService = mock(UserMemoryFactService.class);
         UserProfileMemoryProperties properties = new UserProfileMemoryProperties();
@@ -75,7 +76,7 @@ class IntentRecognitionAdvisorTests {
 
     @Test
     void adviseCallSkipsProfileSummaryWhenDisabled() {
-        CustomerIntentRecognitionClient client = mock(CustomerIntentRecognitionClient.class);
+        CustomerIntentRecognitionService client = mock(CustomerIntentRecognitionService.class);
         ChatHistoryService chatHistoryService = mock(ChatHistoryService.class);
         UserMemoryFactService userMemoryFactService = mock(UserMemoryFactService.class);
         UserProfileMemoryProperties properties = new UserProfileMemoryProperties();
@@ -110,7 +111,7 @@ class IntentRecognitionAdvisorTests {
         verifyNoInteractions(userMemoryFactService);
     }
 
-    private IntentRecognitionRequest verifyClientRequest(CustomerIntentRecognitionClient client) {
+    private IntentRecognitionRequest verifyClientRequest(CustomerIntentRecognitionService client) {
         var captor = org.mockito.ArgumentCaptor.forClass(IntentRecognitionRequest.class);
         verify(client).recognize(captor.capture());
         return captor.getValue();

@@ -1,10 +1,10 @@
 package com.weiqiang.skyai.advisor;
 
-import com.weiqiang.skyai.intent_recognition.client.CustomerIntentRecognitionClient;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionRequest;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.intent_recognition.service.CustomerIntentRecognitionService;
 import com.weiqiang.skyai.memory.config.UserProfileMemoryProperties;
 import com.weiqiang.skyai.memory.service.ChatHistoryService;
 import com.weiqiang.skyai.memory.service.UserMemoryFactService;
@@ -32,18 +32,18 @@ import java.util.Map;
 public class IntentRecognitionAdvisor implements CallAdvisor, StreamAdvisor {
 
     private static final String INTENT_RESULT_KEY = "intentResult";
-    private final CustomerIntentRecognitionClient customerIntentRecognitionClient;
+    private final CustomerIntentRecognitionService customerIntentRecognitionService;
     private final ChatHistoryService chatHistoryService;
     private final UserMemoryFactService userMemoryFactService;
     private final UserProfileMemoryProperties userProfileMemoryProperties;
     private final UserProfileInjectionMetrics userProfileInjectionMetrics;
 
-    public IntentRecognitionAdvisor(CustomerIntentRecognitionClient customerIntentRecognitionClient,
+    public IntentRecognitionAdvisor(CustomerIntentRecognitionService customerIntentRecognitionService,
                                     ChatHistoryService chatHistoryService,
                                     UserMemoryFactService userMemoryFactService,
                                     UserProfileMemoryProperties userProfileMemoryProperties,
                                     UserProfileInjectionMetrics userProfileInjectionMetrics) {
-        this.customerIntentRecognitionClient = customerIntentRecognitionClient;
+        this.customerIntentRecognitionService = customerIntentRecognitionService;
         this.chatHistoryService = chatHistoryService;
         this.userMemoryFactService = userMemoryFactService;
         this.userProfileMemoryProperties = userProfileMemoryProperties;
@@ -86,7 +86,7 @@ public class IntentRecognitionAdvisor implements CallAdvisor, StreamAdvisor {
         String userId = stringParam(chatClientRequest, "userId", null);
         String userText = chatClientRequest.prompt().getUserMessage().getText();
         ProfileSummaryInjection profileSummaryInjection = injectProfileSummary(userId, userText);
-        result = customerIntentRecognitionClient.recognize(
+        result = customerIntentRecognitionService.recognize(
                 new IntentRecognitionRequest(profileSummaryInjection.message(), chatHistoryService.buildHistory(conversationId, userId))
         );
         if (result == null) {
