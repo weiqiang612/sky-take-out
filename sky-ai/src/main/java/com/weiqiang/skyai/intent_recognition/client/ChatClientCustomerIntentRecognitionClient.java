@@ -41,6 +41,7 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
             - order_status
             - cancel_order
             - request_refund
+            - reorder
             - track_delivery
             - report_missing_item
             - change_address

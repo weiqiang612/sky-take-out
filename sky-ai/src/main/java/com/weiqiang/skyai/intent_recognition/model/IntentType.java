@@ -7,6 +7,7 @@ public enum IntentType {
     ORDER_STATUS("order_status", false),
     CANCEL_ORDER("cancel_order", true),
     REQUEST_REFUND("request_refund", true),
+    REORDER("reorder", false),
     TRACK_DELIVERY("track_delivery", false),
     REPORT_MISSING_ITEM("report_missing_item", true),
     CHANGE_ADDRESS("change_address", true),

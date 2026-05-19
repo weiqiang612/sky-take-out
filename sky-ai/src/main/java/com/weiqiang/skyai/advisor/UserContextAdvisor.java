@@ -108,9 +108,11 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
         switch (intentType) {
             case ORDER_STATUS, TRACK_DELIVERY -> parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
-            case CANCEL_ORDER, REQUEST_REFUND -> parts.add(sentence("Known issues should be treated as persistent operational memory when present."));
+            case CANCEL_ORDER, REQUEST_REFUND ->
+                    parts.add(sentence("Known issues should be treated as persistent operational memory when present."));
             case REPORT_MISSING_ITEM -> parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
-            case CHANGE_ADDRESS -> parts.add(sentence("The current user may manage their own saved addresses directly."));
+            case CHANGE_ADDRESS ->
+                    parts.add(sentence("The current user may manage their own saved addresses directly."));
             case MENU_QUERY -> {
                 parts.add(sentence("If the user names a dish or setmeal, search the menu first and then act on the unique match directly."));
                 parts.add(sentence("Do not ask the user to provide an id when search tools can resolve it."));
@@ -152,8 +154,8 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         }
         return switch (intentType) {
             case SHOP_STATUS -> ProfileInjectionLevel.NONE;
-            case ORDER_STATUS, TRACK_DELIVERY, CANCEL_ORDER, REQUEST_REFUND, CHANGE_ADDRESS, ADDRESS_MANAGEMENT, REPORT_MISSING_ITEM, OTHER ->
-                    ProfileInjectionLevel.SUMMARY;
+            case ORDER_STATUS, TRACK_DELIVERY, CANCEL_ORDER, REQUEST_REFUND, CHANGE_ADDRESS, ADDRESS_MANAGEMENT,
+                 REPORT_MISSING_ITEM, REORDER, OTHER -> ProfileInjectionLevel.SUMMARY;
             case MENU_QUERY, CART_MANAGEMENT, FAQ, ESCALATE_TO_HUMAN -> ProfileInjectionLevel.FULL;
         };
     }
@@ -186,9 +188,11 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
             case ORDER_STATUS, TRACK_DELIVERY, REPORT_MISSING_ITEM, ESCALATE_TO_HUMAN -> {
                 // no extra fact lines
             }
-            case CANCEL_ORDER, REQUEST_REFUND -> addMemoryLines(lines, userId, List.of(MemoryFactKey.OPERATIONAL_NOTES));
-            case CHANGE_ADDRESS, ADDRESS_MANAGEMENT -> addMemoryLines(lines, userId, List.of(MemoryFactKey.DEFAULT_ADDRESS));
-            case MENU_QUERY, CART_MANAGEMENT, FAQ -> addMemoryLines(lines, userId, List.of(
+            case CANCEL_ORDER, REQUEST_REFUND ->
+                    addMemoryLines(lines, userId, List.of(MemoryFactKey.OPERATIONAL_NOTES));
+            case CHANGE_ADDRESS, ADDRESS_MANAGEMENT ->
+                    addMemoryLines(lines, userId, List.of(MemoryFactKey.DEFAULT_ADDRESS));
+            case MENU_QUERY, CART_MANAGEMENT, FAQ, REORDER -> addMemoryLines(lines, userId, List.of(
                     MemoryFactKey.FAVORITE_DISHES,
                     MemoryFactKey.FAVORITE_FLAVORS,
                     MemoryFactKey.DIETARY_RESTRICTIONS
@@ -233,14 +237,20 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
             return Set.of();
         }
         return switch (intentResult.intent()) {
-            case ORDER_STATUS, TRACK_DELIVERY -> setOf("searchOrders", "getOrderDetail", "listRecentOrders", "remindOrder");
+            case ORDER_STATUS, TRACK_DELIVERY ->
+                    setOf("searchOrders", "getOrderDetail", "listRecentOrders", "remindOrder");
             case CANCEL_ORDER -> setOf("searchOrders", "cancelOrder");
             case REQUEST_REFUND -> setOf("searchOrders", "requestRefund");
+            case REORDER -> setOf("searchOrders", "listRecentOrders", "searchDishes",
+                    "searchSetmeals", "addDishToCart", "addSetmealToCart", "reorder");
             case CHANGE_ADDRESS -> setOf("searchOrders", "searchAddresses", "updateDeliveryAddress");
             case REPORT_MISSING_ITEM -> setOf("searchOrders", "getOrderDetail", "requestRefund");
-            case MENU_QUERY -> setOf("searchDishes", "searchSetmeals", "listCategories", "listDishesByCategory", "listSetmealsByCategory", "listSetmealDishes", "getShopStatus");
-            case CART_MANAGEMENT -> setOf("searchDishes", "searchSetmeals", "searchCartItems", "listCart", "addDishToCart", "addSetmealToCart", "removeCartItem", "cleanCart");
-            case ADDRESS_MANAGEMENT -> setOf("searchAddresses", "listAddresses", "getDefaultAddress", "setDefaultAddress", "updateAddress");
+            case MENU_QUERY ->
+                    setOf("searchDishes", "searchSetmeals", "listCategories", "listDishesByCategory", "listSetmealsByCategory", "listSetmealDishes", "getShopStatus");
+            case CART_MANAGEMENT ->
+                    setOf("searchDishes", "searchSetmeals", "searchCartItems", "listCart", "addDishToCart", "addSetmealToCart", "removeCartItem", "cleanCart");
+            case ADDRESS_MANAGEMENT ->
+                    setOf("searchAddresses", "listAddresses", "getDefaultAddress", "setDefaultAddress", "updateAddress");
             case SHOP_STATUS -> setOf("getShopStatus");
             case FAQ, ESCALATE_TO_HUMAN, OTHER -> Set.of();
         };
