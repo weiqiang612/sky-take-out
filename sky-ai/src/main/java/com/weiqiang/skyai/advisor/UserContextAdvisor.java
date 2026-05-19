@@ -236,24 +236,36 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         if (intentResult == null) {
             return Set.of();
         }
-        return switch (intentResult.intent()) {
-            case ORDER_STATUS, TRACK_DELIVERY ->
-                    setOf("searchOrders", "getOrderDetail", "listRecentOrders", "remindOrder");
-            case CANCEL_ORDER -> setOf("searchOrders", "cancelOrder");
-            case REQUEST_REFUND -> setOf("searchOrders", "requestRefund");
-            case REORDER -> setOf("searchOrders", "listRecentOrders", "searchDishes",
-                    "searchSetmeals", "addDishToCart", "addSetmealToCart", "reorder");
-            case CHANGE_ADDRESS -> setOf("searchOrders", "searchAddresses", "updateDeliveryAddress");
-            case REPORT_MISSING_ITEM -> setOf("searchOrders", "getOrderDetail", "requestRefund");
-            case MENU_QUERY ->
-                    setOf("searchDishes", "searchSetmeals", "listCategories", "listDishesByCategory", "listSetmealsByCategory", "listSetmealDishes", "getShopStatus");
-            case CART_MANAGEMENT ->
-                    setOf("searchDishes", "searchSetmeals", "searchCartItems", "listCart", "addDishToCart", "addSetmealToCart", "removeCartItem", "cleanCart");
-            case ADDRESS_MANAGEMENT ->
-                    setOf("searchAddresses", "listAddresses", "getDefaultAddress", "setDefaultAddress", "updateAddress");
-            case SHOP_STATUS -> setOf("getShopStatus");
-            case FAQ, ESCALATE_TO_HUMAN, OTHER -> Set.of();
+        // 非 TASK 意图直接返回空
+        if (!intentResult.intent().isTask()) return Set.of();
+
+        // 第一级：domain 基础工具集
+        Set<String> base = switch (intentResult.intent().domain()) {
+            case ORDER   -> setOf("searchOrders", "getOrderDetail", "listRecentOrders");
+            case MENU    -> setOf("searchDishes", "searchSetmeals");
+            case ADDRESS -> setOf("searchAddresses", "listAddresses");
+            case SHOP    -> setOf("getShopStatus");
         };
+
+        // 第二级：intent 追加专属工具
+        Set<String> extra = switch (intentResult.intent()) {
+            case ORDER_STATUS, TRACK_DELIVERY -> setOf("remindOrder");
+            case CANCEL_ORDER                 -> setOf("cancelOrder");
+            case REQUEST_REFUND               -> setOf("requestRefund");
+            case REPORT_MISSING_ITEM          -> setOf("requestRefund");
+            case REORDER                      -> setOf("addDishToCart", "addSetmealToCart", "reorder");
+            case CHANGE_ADDRESS               -> setOf("updateDeliveryAddress");
+            case MENU_QUERY                   -> setOf("listCategories", "listDishesByCategory",
+                    "listSetmealsByCategory", "listSetmealDishes", "getShopStatus");
+            case CART_MANAGEMENT              -> setOf("searchCartItems", "listCart", "addDishToCart",
+                    "addSetmealToCart", "removeCartItem", "cleanCart");
+            case ADDRESS_MANAGEMENT           -> setOf("getDefaultAddress", "setDefaultAddress", "updateAddress");
+            default                           -> Set.of();
+        };
+
+        Set<String> merged = new LinkedHashSet<>(base);
+        merged.addAll(extra);
+        return merged;
     }
 
     private Set<String> setOf(String... tools) {
