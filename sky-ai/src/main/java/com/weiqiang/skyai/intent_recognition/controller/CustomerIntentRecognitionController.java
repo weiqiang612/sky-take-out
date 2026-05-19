@@ -9,14 +9,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@RestController
-@RequestMapping("/customer/intent")
+//@RestController
+//@RequestMapping("/customer/intent")
 @RequiredArgsConstructor
 public class CustomerIntentRecognitionController {
 
     private final CustomerIntentRecognitionService customerIntentRecognitionService;
 
-    @PostMapping("/recognize")
+//    @PostMapping("/recognize")
     public IntentRecognitionResult recognize(@RequestBody IntentRecognitionRequest request) {
         return customerIntentRecognitionService.recognize(request);
     }
