@@ -199,7 +199,7 @@ public class AgentChatService {
     }
 
     private boolean shouldUseRag(IntentRecognitionResult intentResult) {
-        return intentResult != null && intentResult.intent() == IntentType.FAQ;
+        return intentResult != null && intentResult.intent().isKnowledge();
     }
 
     private String buildQuestion(String prefix, IntentRecognitionResult intentResult) {

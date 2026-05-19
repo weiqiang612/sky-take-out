@@ -85,7 +85,7 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         IntentRecognitionResult preIntent = agentChatService.recognizeIntent(request.message(), conversationId, userId);
-        if (preIntent.intent() == IntentType.OTHER) {
+        if (preIntent.intent().isConversational()) {
             sendOtherResponse(session, preIntent);
             agentChatService.writeTurn(userId, conversationId, preIntent);
             return;
