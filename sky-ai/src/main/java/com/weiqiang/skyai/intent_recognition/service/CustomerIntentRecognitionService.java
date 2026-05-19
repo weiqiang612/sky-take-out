@@ -20,12 +20,6 @@ import java.util.Map;
 public class CustomerIntentRecognitionService {
 
     private static final String DEFAULT_CLARIFICATION_QUESTION = "可以补充一下你的具体诉求吗，例如订单号、商品或想处理的事项？";
-    private static final List<IntentType> HIGH_RISK_INTENTS = List.of(
-            IntentType.CANCEL_ORDER,
-            IntentType.REQUEST_REFUND,
-            IntentType.CHANGE_ADDRESS
-    );
-
     private final CustomerIntentRecognitionClient customerIntentRecognitionClient;
 
     public IntentRecognitionResult recognize(IntentRecognitionRequest request) {
@@ -89,6 +83,6 @@ public class CustomerIntentRecognitionService {
     }
 
     private boolean isHighRisk(IntentType intent) {
-        return HIGH_RISK_INTENTS.contains(intent);
+        return intent != null && intent.isHighRisk();
     }
 }
