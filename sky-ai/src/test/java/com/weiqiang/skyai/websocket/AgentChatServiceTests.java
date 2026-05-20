@@ -93,7 +93,7 @@ class AgentChatServiceTests {
 
         assertEquals("confirmation", service.confirmationFrame(result).type());
         assertEquals("12345", service.confirmationFrame(result).orderId());
-        assertEquals("Do you want to cancel order 12345?", service.confirmationFrame(result).question());
+        assertEquals("Canceling this order will stop fulfillment.", service.confirmationFrame(result).question());
         assertEquals("Canceling this order will stop fulfillment.", service.confirmationFrame(result).reason());
     }
 

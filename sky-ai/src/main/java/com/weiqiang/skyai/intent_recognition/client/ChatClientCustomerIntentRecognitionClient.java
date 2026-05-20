@@ -32,12 +32,16 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
         4. 所有的实体提取必须严格基于对话内容，不得编造。
 
         ### 规则：
-        1. 不确定时不要猜，优先返回 other 或最保守意图。
-        2. 有歧义时把候选意图写入 possible_intents，不要强行只选一个。
-        3. confidence 低时必须给出 clarification_question。
-        4. cancel_order、request_refund、change_address、report_missing_item 这类高风险操作必须标记 requires_human_confirmation=true，并在 human_confirmation_reason 中说明原因。
-        5. entities 只返回字符串键值对，优先提取 order_id、item_name、address 等业务实体。
-        6. 只返回可被 JSON 反序列化的结构化结果，不要输出解释性文本。
+        1. **不确定与歧义**：不确定时不要猜，优先返回 `other`。有歧义时把候选意图写入 `possible_intents`。
+        2. **核心槽位（实体）缺失规则**：如果用户触发了某个意图，但**缺失了执行该操作所必需的核心参数**（例如：修改地址缺少 `address`、退款缺少 `order_id`）：
+           - 必须将 `confidence` 设为 `LOW`。
+           - 必须在 `clarification_question` 中填写向用户追问参数的问题。
+           - **此时绝对不允许触发确认**：`requires_human_confirmation` 必须为 `false`，且 `human_confirmation_reason` 必须为空字符串 `""`。
+        3. **高风险确认规则**：当且仅当意图为高风险操作（`cancel_order`、`request_refund`、`change_address`、`report_missing_item`），且**核心参数已全部集齐**准备提交系统时：
+           - 必须标记 `requires_human_confirmation=true`。
+           - 必须在 `human_confirmation_reason` 中说明需要用户确认的具体原因。
+           - **此时绝对不允许反问**：`clarification_question` 必须为空字符串 `""`。
+        4. **字段默认值**：任何不填写的字符串字段（如未触发确认时的 `human_confirmation_reason` 或未触发反问时的 `clarification_question`），**必须统一输出为空字符串 `""`**，确保 JSON 结构完整。
 
         ### 意图说明与示例：
 

@@ -13,8 +13,11 @@ public record IntentRecognitionResult(
         @JsonProperty("confidence") ConfidenceLevel confidence,
         @JsonProperty("entities") Map<String, String> entities,
         @JsonProperty("possible_intents") List<IntentType> possibleIntents,
+        // 需要澄清的问题
         @JsonProperty("clarification_question") @Nullable String clarificationQuestion,
+        // 需要二次确认
         @JsonProperty("requires_human_confirmation") boolean requiresHumanConfirmation,
+        // 需要人工确认的原因
         @JsonProperty("human_confirmation_reason") @Nullable String humanConfirmationReason
 ) {
 }

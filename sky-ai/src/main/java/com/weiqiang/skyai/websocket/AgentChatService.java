@@ -98,16 +98,21 @@ public class AgentChatService {
 
     public String confirmationQuestion(IntentRecognitionResult intentResult) {
         if (intentResult == null) {
-            return "Please confirm this action.";
+            return "请确认该操作！";
         }
-        if (StringUtils.hasText(intentResult.clarificationQuestion())) {
-            return intentResult.clarificationQuestion();
+
+        // 只有在明确需要人工确认的情况下，优先使用模型给的原因
+        if (intentResult.requiresHumanConfirmation() && StringUtils.hasText(intentResult.humanConfirmationReason())) {
+            return intentResult.humanConfirmationReason();
         }
+
+        // 如果没有配置 reason，使用本地的 switch-case 模板硬性兜底弹窗文本
         return switch (intentResult.intent()) {
-            case CANCEL_ORDER -> buildQuestion("Do you want to cancel order", intentResult);
-            case REQUEST_REFUND -> buildQuestion("Do you want to request a refund for order", intentResult);
-            case CHANGE_ADDRESS -> buildQuestion("Do you want to change the delivery address for order", intentResult);
-            default -> "Please confirm this action.";
+            case CANCEL_ORDER       -> buildQuestion("是否确认取消订单", intentResult);
+            case REQUEST_REFUND     -> buildQuestion("是否确认申请退款", intentResult);
+            case CHANGE_ADDRESS     -> buildQuestion("是否确认修改配送地址", intentResult);
+            case REPORT_MISSING_ITEM -> buildQuestion("是否确认申报缺漏商品", intentResult);
+            default                 -> "请确认该操作。";
         };
     }
 
@@ -131,7 +136,7 @@ public class AgentChatService {
         );
     }
 
-    public IntentRecognitionResult confirmedIntent(String intentValue) {
+    public IntentRecognitionResult confirmedIntent(String intentValue,  IntentRecognitionResult original) {
         IntentType intent = IntentType.fromValue(intentValue);
         if (intent == null) {
             throw new IllegalArgumentException("intent is required");
@@ -139,7 +144,9 @@ public class AgentChatService {
         return new IntentRecognitionResult(
                 intent,
                 ConfidenceLevel.HIGH,
-                Map.of(),
+                original != null && original.entities() != null
+                        ? original.entities()   // ← 复用原始 entities
+                        : Map.of(),
                 List.of(intent),
                 null,
                 false,

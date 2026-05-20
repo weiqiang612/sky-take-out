@@ -32,6 +32,7 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
     private static final String PENDING_QUESTION_KEY = "pendingQuestion";
     private static final String PENDING_INTENT_KEY = "pendingIntent";
     private static final String ACTIVE_CONVERSATION_ID_KEY = "activeConversationId";
+    private static final String PENDING_INTENT_RESULT_KEY = "pendingIntentResult";
     private static final String CANCEL_TYPE = "cancel";
 
     private final AgentChatService agentChatService;
@@ -70,6 +71,7 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         disposeActiveSubscription(conversationId);
         session.getAttributes().remove(PENDING_QUESTION_KEY);
         session.getAttributes().remove(PENDING_INTENT_KEY);
+        session.getAttributes().remove(PENDING_INTENT_RESULT_KEY);
     }
 
     private void handleQuestion(WebSocketSession session, AgentChatRequest request) {
@@ -84,24 +86,46 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             sendError(session, "conversationId and userId are required");
             return;
         }
+
+        // 1. 意图识别
         IntentRecognitionResult preIntent = agentChatService.recognizeIntent(request.message(), conversationId, userId);
+
+        // 2. 兜底处理：如果是 Conversational 意图（如打招呼、闲聊等），直接结束
         if (preIntent.intent().isConversational()) {
             sendOtherResponse(session, preIntent);
             agentChatService.writeTurn(userId, conversationId, preIntent);
             return;
         }
+
+        // 3. 核心拦截：如果是高风险意图但核心参数不全（新 Prompt 规范下的澄清场景）
+        // 此时模型会给出澄清反问，且 requiresHumanConfirmation 为 false
+        if (StringUtils.hasText(preIntent.clarificationQuestion())) {
+            // 利用你原有的方案：发 token（气泡） + sendDone 闭环
+            sendToken(session, preIntent.clarificationQuestion());
+            sendDone(session, preIntent);
+            // 记录到会话上下文历史，以便下一轮用户提供地址时能被串起来
+            agentChatService.writeTurn(userId, conversationId, preIntent);
+            return;
+        }
+
+        // 4. 正常流转：高风险意图且核心参数已全部备齐 -> 抛出真正的【弹窗确认帧】
         if (preIntent.requiresHumanConfirmation()) {
             session.getAttributes().put(PENDING_QUESTION_KEY, request.message());
             session.getAttributes().put(PENDING_INTENT_KEY, preIntent.intent().value());
+            session.getAttributes().put(PENDING_INTENT_RESULT_KEY, preIntent);
             sendConfirmation(session, agentChatService.confirmationFrame(preIntent));
             return;
         }
+
+        // 5. 既不需要确认也不需要澄清的普通操作（例如：普通的订单状态查询等） -> 开启流式 Tool 推理
         startStreaming(session, request.message(), conversationId, userId, preIntent);
     }
 
     private void handleConfirmation(WebSocketSession session, AgentChatRequest request) {
         String pendingQuestion = safeText((String) session.getAttributes().get(PENDING_QUESTION_KEY));
         String pendingIntent = safeText((String) session.getAttributes().get(PENDING_INTENT_KEY));
+        IntentRecognitionResult pendingIntentResult =
+                (IntentRecognitionResult) session.getAttributes().get(PENDING_INTENT_RESULT_KEY);
         String conversationId = safeText(request.conversationId());
         String userId = safeText(request.userId());
         if (!StringUtils.hasText(pendingQuestion) || !StringUtils.hasText(pendingIntent)
@@ -116,13 +140,17 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         }
         IntentRecognitionResult confirmedIntent;
         try {
-            confirmedIntent = agentChatService.confirmedIntent(requestedIntent);
+            confirmedIntent =
+                    agentChatService.confirmedIntent(requestedIntent, pendingIntentResult);
         } catch (Exception ex) {
             sendError(session, "Invalid confirmation intent");
             return;
         }
+
         session.getAttributes().remove(PENDING_QUESTION_KEY);
         session.getAttributes().remove(PENDING_INTENT_KEY);
+        session.getAttributes().remove(PENDING_INTENT_RESULT_KEY);
+
         startStreaming(session, pendingQuestion, conversationId, userId, confirmedIntent);
     }
 
