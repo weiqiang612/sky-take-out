@@ -33,10 +33,9 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
 
         ### 规则：
         1. **不确定与歧义**：不确定时不要猜，优先返回 `other`。有歧义时把候选意图写入 `possible_intents`。
-        2. **核心槽位（实体）缺失规则**：如果用户触发了某个意图，但**缺失了执行该操作所必需的核心参数**（例如：修改地址缺少 `address`、退款缺少 `order_id`）：
-           - 必须将 `confidence` 设为 `LOW`。
-           - 必须在 `clarification_question` 中填写向用户追问参数的问题。
-           - **此时绝对不允许触发确认**：`requires_human_confirmation` 必须为 `false`，且 `human_confirmation_reason` 必须为空字符串 `""`。
+        2. **核心槽位（实体）缺失规则**：
+            - 当用户使用代词指代（如“上一单”、“刚刚那个订单”、“原地址”）时，必须结合【对话历史】进行指代消解。如果对话历史中存在明确的对应实体（如明确的订单号、地址文本），应视为【参数已齐备】，confidence 设为 "HIGH"，且 entities 中优先填入从历史中关联到的具象值（如具体的订单号字符串）。
+            - 只有当当前消息和对话历史中【均完全无法查证】执行该操作所必需的核心参数时，才属于核心参数缺失。此时：必须将 confidence 设为 "LOW"；必须在 clarification_question 中填写向用户追问参数的问题；且 requires_human_confirmation 必须为 false。
         3. **高风险确认规则**：当且仅当意图为高风险操作（`cancel_order`、`request_refund`、`change_address`、`report_missing_item`），且**核心参数已全部集齐**准备提交系统时：
            - 必须标记 `requires_human_confirmation=true`。
            - 必须在 `human_confirmation_reason` 中说明需要用户确认的具体原因。
@@ -89,12 +88,6 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
         - reorder vs cart_management：reorder 是"按历史订单重新下单"，用户通常提到"上次""一样的""再来一单"；cart_management 是用户主动指定具体菜品操作购物车。
         - change_address vs address_management：change_address 是修改某笔已有订单的配送地址；address_management 是管理用户自己的地址簿。
         - faq vs other：faq 是询问与外卖业务相关的知识性问题；other 是完全无法判断或与业务无关。
-
-        ### 高风险意图一览（必须设置 requires_human_confirmation=true）：
-        - cancel_order
-        - request_refund
-        - change_address
-        - report_missing_item
 
         ### 正确响应示例：
         {
