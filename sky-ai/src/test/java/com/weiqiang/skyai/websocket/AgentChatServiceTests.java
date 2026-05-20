@@ -58,7 +58,17 @@ class AgentChatServiceTests {
                 mock(ChatHistoryService.class)
         );
 
-        IntentRecognitionResult confirmed = service.confirmedIntent("cancel_order");
+        IntentRecognitionResult mockPendingResult = new IntentRecognitionResult(
+                IntentType.CHANGE_ADDRESS,
+                ConfidenceLevel.HIGH,
+                Map.of("order_id", "1779262915511", "address", "大陆村镇"),
+                List.of(IntentType.CHANGE_ADDRESS),
+                "",
+                true,
+                "高危操作，需要确认"
+        );
+
+        IntentRecognitionResult confirmed = service.confirmedIntent("cancel_order", mockPendingResult);
 
         assertEquals(IntentType.CANCEL_ORDER, confirmed.intent());
         assertEquals(ConfidenceLevel.HIGH, confirmed.confidence());
@@ -112,7 +122,7 @@ class AgentChatServiceTests {
                 mock(ChatHistoryService.class)
         );
 
-        assertThrows(IllegalArgumentException.class, () -> service.confirmedIntent("not-a-real-intent"));
+        assertThrows(IllegalArgumentException.class, () -> service.confirmedIntent("not-a-real-intent", null));
     }
 
     @Test
