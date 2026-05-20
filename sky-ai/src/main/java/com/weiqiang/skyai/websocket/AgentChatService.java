@@ -158,6 +158,7 @@ public class AgentChatService {
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId)
                         .param("userId", userId)
                         .param("preRecognizedIntent", preIntent))
+                // 将用户ID作为上下文传给工具调用，以便工具调用时可以获取到用户相关信息
                 .toolContext(Map.of("userId", userId))
                 .user(question)
                 .stream()

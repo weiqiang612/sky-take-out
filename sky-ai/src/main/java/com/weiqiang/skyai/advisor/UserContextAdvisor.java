@@ -51,6 +51,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
+        // 根据拿到的意图识别的结果，动态的构建LLM可用工具
         IntentRecognitionResult intentResult = (IntentRecognitionResult) chatClientRequest.context().get("intentResult");
         chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
         String userId = stringParam(chatClientRequest, "userId");
@@ -91,6 +92,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
     private String buildContextBlock(IntentRecognitionResult intentResult, String userId) {
         IntentType intentType = intentResult == null ? IntentType.OTHER : intentResult.intent();
+        // 根据意图识别的类型，按不同的粒度注入用户自定义记忆
         ProfileInjectionLevel profileInjectionLevel = profileInjectionLevel(intentType);
         String profileText = buildProfileText(userId, profileInjectionLevel);
         int charsInjected = profileText == null ? 0 : profileText.length();
@@ -106,6 +108,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
             parts.add(memoryBlock);
         }
 
+        // 根据不同的意图类型，注入额外的上下文信息，帮助模型更好的理解用户的需求和背景
         switch (intentType) {
             case ORDER_STATUS, TRACK_DELIVERY -> parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
             case CANCEL_ORDER, REQUEST_REFUND ->

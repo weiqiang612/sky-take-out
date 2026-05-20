@@ -7,6 +7,10 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+/**
+ * Metrics for tracking user profile injection in the advisor.
+ * Records counts and character lengths of injected profiles during context building and intent recognition.
+ */
 @Component
 @RequiredArgsConstructor
 public class UserProfileInjectionMetrics {
