@@ -7,6 +7,7 @@ import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.intent_recognition.service.CustomerIntentRecognitionService;
 import com.weiqiang.skyai.advisor.IntentRecognitionAdvisor;
 import com.weiqiang.skyai.advisor.SafeToolCallAdvisor;
+import com.weiqiang.skyai.advisor.RagAdvisor;
 import com.weiqiang.skyai.advisor.ToolFilterAdvisor;
 import com.weiqiang.skyai.advisor.UserContextAdvisor;
 import com.weiqiang.skyai.memory.service.ChatHistoryService;
@@ -17,7 +18,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -41,7 +41,7 @@ public class AgentChatService {
     private final IntentRecognitionAdvisor intentRecognitionAdvisor;
     private final UserContextAdvisor userContextAdvisor;
     private final MessageChatMemoryAdvisor messageChatMemoryAdvisor;
-    private final QuestionAnswerAdvisor questionAnswerAdvisor;
+    private final RagAdvisor ragAdvisor;
     private final ToolFilterAdvisor toolFilterAdvisor;
     private final SafeToolCallAdvisor safeToolCallAdvisor;
     private final MemoryWriterService memoryWriterService;
@@ -52,7 +52,7 @@ public class AgentChatService {
                             IntentRecognitionAdvisor intentRecognitionAdvisor,
                             UserContextAdvisor userContextAdvisor,
                             MessageChatMemoryAdvisor messageChatMemoryAdvisor,
-                            QuestionAnswerAdvisor questionAnswerAdvisor,
+                            RagAdvisor ragAdvisor,
                             ToolFilterAdvisor toolFilterAdvisor,
                             SafeToolCallAdvisor safeToolCallAdvisor,
                             MemoryWriterService memoryWriterService,
@@ -62,7 +62,7 @@ public class AgentChatService {
         this.intentRecognitionAdvisor = intentRecognitionAdvisor;
         this.userContextAdvisor = userContextAdvisor;
         this.messageChatMemoryAdvisor = messageChatMemoryAdvisor;
-        this.questionAnswerAdvisor = questionAnswerAdvisor;
+        this.ragAdvisor = ragAdvisor;
         this.toolFilterAdvisor = toolFilterAdvisor;
         this.safeToolCallAdvisor = safeToolCallAdvisor;
         this.memoryWriterService = memoryWriterService;
@@ -89,7 +89,7 @@ public class AgentChatService {
         advisors.add(userContextAdvisor);
         advisors.add(messageChatMemoryAdvisor);
         if (shouldUseRag(preIntent)) {
-            advisors.add(questionAnswerAdvisor);
+            advisors.add(ragAdvisor);
         }
         advisors.add(toolFilterAdvisor);
         advisors.add(safeToolCallAdvisor);

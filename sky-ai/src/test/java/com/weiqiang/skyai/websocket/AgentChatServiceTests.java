@@ -5,6 +5,7 @@ import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.intent_recognition.service.CustomerIntentRecognitionService;
 import com.weiqiang.skyai.advisor.IntentRecognitionAdvisor;
+import com.weiqiang.skyai.advisor.RagAdvisor;
 import com.weiqiang.skyai.advisor.SafeToolCallAdvisor;
 import com.weiqiang.skyai.advisor.ToolFilterAdvisor;
 import com.weiqiang.skyai.advisor.UserContextAdvisor;
@@ -16,7 +17,7 @@ import org.springframework.ai.chat.client.ChatClient.ChatClientRequestSpec;
 import org.springframework.ai.chat.client.ChatClient.StreamResponseSpec;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Scheduler;
@@ -31,6 +32,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -48,7 +50,7 @@ class AgentChatServiceTests {
                 mock(IntentRecognitionAdvisor.class),
                 mock(UserContextAdvisor.class),
                 mock(MessageChatMemoryAdvisor.class),
-                mock(QuestionAnswerAdvisor.class),
+                mock(RagAdvisor.class),
                 mock(ToolFilterAdvisor.class),
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
@@ -71,7 +73,7 @@ class AgentChatServiceTests {
                 mock(IntentRecognitionAdvisor.class),
                 mock(UserContextAdvisor.class),
                 mock(MessageChatMemoryAdvisor.class),
-                mock(QuestionAnswerAdvisor.class),
+                mock(RagAdvisor.class),
                 mock(ToolFilterAdvisor.class),
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
@@ -102,7 +104,7 @@ class AgentChatServiceTests {
                 mock(IntentRecognitionAdvisor.class),
                 mock(UserContextAdvisor.class),
                 mock(MessageChatMemoryAdvisor.class),
-                mock(QuestionAnswerAdvisor.class),
+                mock(RagAdvisor.class),
                 mock(ToolFilterAdvisor.class),
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
@@ -133,7 +135,7 @@ class AgentChatServiceTests {
                 mock(IntentRecognitionAdvisor.class),
                 mock(UserContextAdvisor.class),
                 mock(MessageChatMemoryAdvisor.class),
-                mock(QuestionAnswerAdvisor.class),
+                mock(RagAdvisor.class),
                 mock(ToolFilterAdvisor.class),
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
@@ -146,6 +148,41 @@ class AgentChatServiceTests {
         );
         assertEquals("Agent stream timed out after 30s", ex.getMessage());
         assertInstanceOf(TimeoutException.class, ex.getCause());
+    }
+
+    @Test
+    void advisorsShouldUseRagAdvisorForFaqIntent() {
+        RagAdvisor ragAdvisor = mock(RagAdvisor.class);
+        AgentChatService service = new AgentChatService(
+                mock(ChatClient.Builder.class),
+                mock(IntentRecognitionAdvisor.class),
+                mock(UserContextAdvisor.class),
+                mock(MessageChatMemoryAdvisor.class),
+                ragAdvisor,
+                mock(ToolFilterAdvisor.class),
+                mock(SafeToolCallAdvisor.class),
+                mock(MemoryWriterService.class),
+                mock(CustomerIntentRecognitionService.class),
+                mock(ChatHistoryService.class)
+        );
+
+        IntentRecognitionResult faq = new IntentRecognitionResult(
+                IntentType.FAQ,
+                ConfidenceLevel.HIGH,
+                Map.of(),
+                List.of(IntentType.FAQ),
+                null,
+                false,
+                null
+        );
+
+        List<CallAdvisor> advisors = service.advisors(faq);
+
+        assertEquals(6, advisors.size());
+        assertInstanceOf(RagAdvisor.class, advisors.get(3));
+        assertEquals(ragAdvisor, advisors.get(3));
+        assertFalse(advisors.stream().anyMatch(advisor -> advisor instanceof org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor));
+        assertNotNull(advisors.get(4));
     }
 
     private Scheduler immediateScheduler() {
