@@ -37,11 +37,14 @@ public class OrderTools {
     public String searchOrders(@ToolParam(description = "Order keyword or a fragment from the order details") String keyword,
                                @ToolParam(description = "Maximum number of candidates to return", required = false) Integer pageSize,
                                ToolContext context) {
+        // 1. 先获取最近订单列表，限制在20条以内，避免数据过多导致性能问题
         String userId = ToolUser.userId(context);
         int limit = pageSize == null || pageSize < 1 ? 10 : Math.min(pageSize, 20);
         String payload = orderGateway.listRecentOrders(userId, limit);
+        // 2. 从订单列表中筛选出与关键词匹配的订单，构建搜索候选项列表
         List<ToolSearchFormatter.SearchCandidate> candidates = new ArrayList<>();
         JsonNode records = readTree(payload).path("records");
+        // 匹配规则：订单号、菜品名称、备注等字段包含关键词，优先级依次降低；如果关键词是纯数字且匹配订单号中的数字，也算匹配，但优先级较低
         if (records.isArray()) {
             String normalizedKeyword = normalize(keyword);
             records.forEach(order -> addOrderCandidate(candidates, order, normalizedKeyword, keyword));

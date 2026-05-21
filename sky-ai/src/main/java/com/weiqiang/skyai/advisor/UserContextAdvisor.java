@@ -52,10 +52,10 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
         // 根据拿到的意图识别的结果，动态的构建LLM可用工具
-        IntentRecognitionResult intentResult = (IntentRecognitionResult) chatClientRequest.context().get("intentResult");
+        IntentRecognitionResult intentResult = resolveIntent(chatClientRequest);
         chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
         String userId = stringParam(chatClientRequest, "userId");
-        String contextBlock = buildContextBlock(intentResult, userId);
+        String contextBlock = buildContextBlock(chatClientRequest, intentResult, userId);
         if (!StringUtils.hasText(contextBlock)) {
             return callAdvisorChain.nextCall(chatClientRequest);
         }
@@ -67,10 +67,10 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     public reactor.core.publisher.Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
-        IntentRecognitionResult intentResult = (IntentRecognitionResult) chatClientRequest.context().get("intentResult");
+        IntentRecognitionResult intentResult = resolveIntent(chatClientRequest);
         chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
         String userId = stringParam(chatClientRequest, "userId");
-        String contextBlock = buildContextBlock(intentResult, userId);
+        String contextBlock = buildContextBlock(chatClientRequest, intentResult, userId);
         if (!StringUtils.hasText(contextBlock)) {
             return streamAdvisorChain.nextStream(chatClientRequest);
         }
@@ -90,7 +90,10 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         return Ordered.HIGHEST_PRECEDENCE + 1;
     }
 
-    private String buildContextBlock(IntentRecognitionResult intentResult, String userId) {
+    private String buildContextBlock(ChatClientRequest request, IntentRecognitionResult intentResult, String userId) {
+        if (Boolean.TRUE.equals(currentFlag(request, "skipProfileInjection"))) {
+            return "";
+        }
         IntentType intentType = intentResult == null ? IntentType.OTHER : intentResult.intent();
         // 根据意图识别的类型，按不同的粒度注入用户自定义记忆
         ProfileInjectionLevel profileInjectionLevel = profileInjectionLevel(intentType);
@@ -323,5 +326,34 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     private String stringParam(ChatClientRequest request, String key) {
         Object value = request.context().get(key);
         return value instanceof String stringValue && StringUtils.hasText(stringValue) ? stringValue : null;
+    }
+
+    private IntentRecognitionResult resolveIntent(ChatClientRequest request) {
+        IntentRecognitionResult intentResult = (IntentRecognitionResult) request.context().get("intentResult");
+        String overrideIntent = stringParam(request, "currentStepIntent");
+        if (!StringUtils.hasText(overrideIntent)) {
+            return intentResult;
+        }
+        IntentType intentType;
+        try {
+            intentType = IntentType.fromValue(overrideIntent);
+        } catch (Exception ex) {
+            return intentResult;
+        }
+        Map<String, String> entities = intentResult == null || intentResult.entities() == null ? Map.of() : intentResult.entities();
+        return new IntentRecognitionResult(
+                intentType,
+                ConfidenceLevel.HIGH,
+                entities,
+                List.of(intentType),
+                null,
+                false,
+                null
+        );
+    }
+
+    private Boolean currentFlag(ChatClientRequest request, String key) {
+        Object value = request.context().get(key);
+        return value instanceof Boolean bool ? bool : null;
     }
 }

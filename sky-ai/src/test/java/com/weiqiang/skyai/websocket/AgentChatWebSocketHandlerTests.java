@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.task.TaskOrchestratorService;
+import com.weiqiang.skyai.task.model.TaskPlanningResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.web.socket.CloseStatus;
@@ -39,7 +41,8 @@ class AgentChatWebSocketHandlerTests {
     @Test
     void cancelFrameShouldDisposeActiveStreamAndAck() throws Exception {
         AgentChatService agentChatService = mock(AgentChatService.class);
-        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, objectMapper);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper);
         WebSocketSession session = mockSession();
         List<String> frames = new ArrayList<>();
         captureFrames(session, frames);
@@ -59,7 +62,8 @@ class AgentChatWebSocketHandlerTests {
     @Test
     void closeConnectionShouldDisposeActiveStream() throws Exception {
         AgentChatService agentChatService = mock(AgentChatService.class);
-        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, objectMapper);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper);
         WebSocketSession session = mockSession();
         IntentRecognitionResult intentResult = new IntentRecognitionResult(
                 IntentType.ORDER_STATUS,
@@ -71,6 +75,7 @@ class AgentChatWebSocketHandlerTests {
                 null
         );
         when(agentChatService.recognizeIntent(eq("where is my order"), eq("conv-2"), eq("user-1"))).thenReturn(intentResult);
+        when(taskOrchestratorService.plan(any(), any(), any(), any())).thenReturn(TaskPlanningResult.notDecomposed());
         when(agentChatService.streamChat(eq("where is my order"), eq("conv-2"), eq("user-1"), any(IntentRecognitionResult.class)))
                 .thenReturn(Flux.never());
 
@@ -90,7 +95,8 @@ class AgentChatWebSocketHandlerTests {
     @Test
     void timeoutStreamShouldSendFriendlyErrorMessage() throws Exception {
         AgentChatService agentChatService = mock(AgentChatService.class);
-        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, objectMapper);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper);
         WebSocketSession session = mockSession();
         List<String> frames = new ArrayList<>();
         captureFrames(session, frames);
@@ -104,6 +110,7 @@ class AgentChatWebSocketHandlerTests {
                 null
         );
         when(agentChatService.recognizeIntent(eq("where is my order"), eq("conv-3"), eq("user-1"))).thenReturn(intentResult);
+        when(taskOrchestratorService.plan(any(), any(), any(), any())).thenReturn(TaskPlanningResult.notDecomposed());
         when(agentChatService.streamChat(eq("where is my order"), eq("conv-3"), eq("user-1"), any(IntentRecognitionResult.class)))
                 .thenReturn(Flux.error(new IllegalStateException("Agent stream timed out after 30s", new TimeoutException())));
 
@@ -117,7 +124,8 @@ class AgentChatWebSocketHandlerTests {
     @Test
     void otherIntentShouldReturnSafeClarificationWithoutStreaming() throws Exception {
         AgentChatService agentChatService = mock(AgentChatService.class);
-        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, objectMapper);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper);
         WebSocketSession session = mockSession();
         List<String> frames = new ArrayList<>();
         captureFrames(session, frames);

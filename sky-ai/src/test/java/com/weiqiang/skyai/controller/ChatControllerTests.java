@@ -3,6 +3,7 @@ package com.weiqiang.skyai.controller;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.task.TaskOrchestratorService;
 import com.weiqiang.skyai.websocket.AgentChatService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -21,7 +22,7 @@ class ChatControllerTests {
 
     @Test
     void shouldUseRagOnlyForFaqIntent() {
-        ChatController controller = new ChatController(mock(AgentChatService.class));
+        ChatController controller = new ChatController(mock(AgentChatService.class), mock(TaskOrchestratorService.class));
 
         IntentRecognitionResult faq = new IntentRecognitionResult(
                 IntentType.FAQ,
@@ -50,7 +51,7 @@ class ChatControllerTests {
     @Test
     void shouldShortCircuitOtherIntentWithoutCallingAsk() {
         AgentChatService agentChatService = mock(AgentChatService.class);
-        ChatController controller = new ChatController(agentChatService);
+        ChatController controller = new ChatController(agentChatService, mock(TaskOrchestratorService.class));
 
         IntentRecognitionResult other = new IntentRecognitionResult(
                 IntentType.OTHER,

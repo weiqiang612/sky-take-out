@@ -4,11 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.task.TaskOrchestratorService;
+import com.weiqiang.skyai.task.model.TaskExecutionOutcome;
+import com.weiqiang.skyai.task.model.TaskPlanningResult;
 import com.weiqiang.skyai.websocket.model.AgentChatCancelledFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatConfirmationFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatDoneFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatErrorFrame;
+import com.weiqiang.skyai.websocket.model.AgentChatPlanCompleteFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatRequest;
+import com.weiqiang.skyai.websocket.model.AgentChatStepDoneFrame;
+import com.weiqiang.skyai.websocket.model.AgentChatStepStartFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatTokenFrame;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -31,16 +37,21 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     private static final String PENDING_QUESTION_KEY = "pendingQuestion";
     private static final String PENDING_INTENT_KEY = "pendingIntent";
-    private static final String ACTIVE_CONVERSATION_ID_KEY = "activeConversationId";
     private static final String PENDING_INTENT_RESULT_KEY = "pendingIntentResult";
+    private static final String ACTIVE_CONVERSATION_ID_KEY = "activeConversationId";
     private static final String CANCEL_TYPE = "cancel";
+    private static final String PLAN_CONFIRM_INTENT = "task_plan";
 
     private final AgentChatService agentChatService;
+    private final TaskOrchestratorService taskOrchestratorService;
     private final ObjectMapper objectMapper;
     private final ConcurrentHashMap<String, Disposable> activeStreams = new ConcurrentHashMap<>();
 
-    public AgentChatWebSocketHandler(AgentChatService agentChatService, ObjectMapper objectMapper) {
+    public AgentChatWebSocketHandler(AgentChatService agentChatService,
+                                     TaskOrchestratorService taskOrchestratorService,
+                                     ObjectMapper objectMapper) {
         this.agentChatService = agentChatService;
+        this.taskOrchestratorService = taskOrchestratorService;
         this.objectMapper = objectMapper;
     }
 
@@ -81,34 +92,31 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         }
         String conversationId = safeText(request.conversationId());
         String userId = safeText(request.userId());
-        log.info("Received question: {}, conversationId: {}, userId: {}", request.message(), conversationId, userId);
         if (!StringUtils.hasText(conversationId) || !StringUtils.hasText(userId)) {
             sendError(session, "conversationId and userId are required");
             return;
         }
 
-        // 1. 意图识别
+        // If there's an active stream for the conversation, abandon it before starting a new one
+        taskOrchestratorService.abandon(conversationId);
         IntentRecognitionResult preIntent = agentChatService.recognizeIntent(request.message(), conversationId, userId);
 
-        // 2. 兜底处理：如果是 Conversational 意图（如打招呼、闲聊等），直接结束
+        // 纯对话
         if (preIntent.intent().isConversational()) {
             sendOtherResponse(session, preIntent);
             agentChatService.writeTurn(userId, conversationId, preIntent);
             return;
         }
 
-        // 3. 核心拦截：如果是高风险意图但核心参数不全（新 Prompt 规范下的澄清场景）
-        // 此时模型会给出澄清反问，且 requiresHumanConfirmation 为 false
+        // 需要澄清
         if (StringUtils.hasText(preIntent.clarificationQuestion())) {
-            // 利用你原有的方案：发 token（气泡） + sendDone 闭环
             sendToken(session, preIntent.clarificationQuestion());
             sendDone(session, preIntent);
-            // 记录到会话上下文历史，以便下一轮用户提供地址时能被串起来
             agentChatService.writeTurn(userId, conversationId, preIntent);
             return;
         }
 
-        // 4. 正常流转：高风险意图且核心参数已全部备齐 -> 抛出真正的【弹窗确认帧】
+        // 需要人确认
         if (preIntent.requiresHumanConfirmation()) {
             session.getAttributes().put(PENDING_QUESTION_KEY, request.message());
             session.getAttributes().put(PENDING_INTENT_KEY, preIntent.intent().value());
@@ -117,7 +125,36 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        // 5. 既不需要确认也不需要澄清的普通操作（例如：普通的订单状态查询等） -> 开启流式 Tool 推理
+        // 对其他请求，尝试分步处理
+        TaskPlanningResult planningResult = taskOrchestratorService.plan(request.message(), conversationId, userId, preIntent);
+        // 1. 复杂任务
+        if (planningResult.decomposed() && planningResult.plan() != null) {
+            send(session, new AgentChatStepStartFrame("step_start", 1, planningResult.plan().steps().get(0).intent().value()));
+            TaskExecutionOutcome outcome = taskOrchestratorService.executePlan(
+                    request.message(),
+                    conversationId,
+                    userId,
+                    preIntent,
+                    planningResult.plan()
+            );
+            if (outcome.waitingForConfirmation()) {
+                session.getAttributes().put(PENDING_QUESTION_KEY, request.message());
+                session.getAttributes().put(PENDING_INTENT_KEY, PLAN_CONFIRM_INTENT);
+                session.getAttributes().put(PENDING_INTENT_RESULT_KEY, preIntent);
+                sendConfirmation(session, new AgentChatConfirmationFrame(
+                        "confirmation",
+                        PLAN_CONFIRM_INTENT,
+                        null,
+                        "下一步将执行高风险操作，确认后继续",
+                        "This plan is waiting for confirmation before continuing."
+                ));
+                return;
+            }
+            sendPlanOutcome(session, outcome, preIntent);
+            return;
+        }
+
+        // 简单请求直接做
         startStreaming(session, request.message(), conversationId, userId, preIntent);
     }
 
@@ -138,20 +175,43 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             sendError(session, "Confirmation intent does not match the pending request");
             return;
         }
-        IntentRecognitionResult confirmedIntent;
-        try {
-            confirmedIntent =
-                    agentChatService.confirmedIntent(requestedIntent, pendingIntentResult);
-        } catch (Exception ex) {
-            sendError(session, "Invalid confirmation intent");
-            return;
-        }
 
         session.getAttributes().remove(PENDING_QUESTION_KEY);
         session.getAttributes().remove(PENDING_INTENT_KEY);
         session.getAttributes().remove(PENDING_INTENT_RESULT_KEY);
 
+        // 确认分步任务的继续执行
+        if (PLAN_CONFIRM_INTENT.equalsIgnoreCase(requestedIntent)) {
+            TaskExecutionOutcome outcome = taskOrchestratorService.continueAfterConfirmation(conversationId, userId);
+            if (outcome.completed()) {
+                sendPlanOutcome(session, outcome, pendingIntentResult);
+            } else {
+                sendError(session, "No pending plan exists");
+            }
+            return;
+        }
+
+        IntentRecognitionResult confirmedIntent;
+        try {
+            confirmedIntent = agentChatService.confirmedIntent(requestedIntent, pendingIntentResult);
+        } catch (Exception ex) {
+            sendError(session, "Invalid confirmation intent");
+            return;
+        }
         startStreaming(session, pendingQuestion, conversationId, userId, confirmedIntent);
+    }
+
+    private void sendPlanOutcome(WebSocketSession session, TaskExecutionOutcome outcome, IntentRecognitionResult intentResult) {
+        for (int i = 0; i < outcome.stepSummaries().size(); i++) {
+            String summary = outcome.stepSummaries().get(i);
+            send(session, new AgentChatStepDoneFrame("step_done", i + 1, summary));
+            if (StringUtils.hasText(summary)) {
+                sendToken(session, summary);
+            }
+        }
+        send(session, new AgentChatPlanCompleteFrame("plan_complete", outcome.finalAnswer(), outcome.stepSummaries().size()));
+        sendToken(session, outcome.finalAnswer());
+        sendDone(session, intentResult);
     }
 
     private void startStreaming(WebSocketSession session,
@@ -220,6 +280,7 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         disposeActiveSubscription(conversationId);
+        taskOrchestratorService.abandon(conversationId);
         String activeConversationId = safeText((String) session.getAttributes().get(ACTIVE_CONVERSATION_ID_KEY));
         if (conversationId.equals(activeConversationId)) {
             session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);

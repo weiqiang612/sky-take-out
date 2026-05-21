@@ -77,9 +77,23 @@ public class AgentChatService {
     }
 
     public String ask(String question, String conversationId, String userId, IntentRecognitionResult preIntent) {
-        ChatClientResponse response = executeCall(question, conversationId, userId, preIntent);
+        ChatClientResponse response = executeCall(question, conversationId, userId, preIntent, Map.of());
         IntentRecognitionResult intentResult = (IntentRecognitionResult) response.context().get("intentResult");
         memoryWriterService.writeTurn(userId, conversationId, intentResult != null ? intentResult : preIntent);
+        return extractAnswer(response);
+    }
+
+    public String askStep(String question, String conversationId, String userId, IntentRecognitionResult stepIntent) {
+        ChatClientResponse response = executeCall(
+                question,
+                conversationId,
+                userId,
+                stepIntent,
+                Map.of(
+                        "currentStepIntent", stepIntent.intent().value(),
+                        "skipProfileInjection", true
+                )
+        );
         return extractAnswer(response);
     }
 
@@ -159,12 +173,25 @@ public class AgentChatService {
     }
 
     public Flux<ChatClientResponse> streamChat(String question, String conversationId, String userId, IntentRecognitionResult preIntent) {
+        return streamChat(question, conversationId, userId, preIntent, Map.of());
+    }
+
+    public Flux<ChatClientResponse> streamChat(String question,
+                                               String conversationId,
+                                               String userId,
+                                               IntentRecognitionResult preIntent,
+                                               Map<String, Object> extraContext) {
         log.info("Starting chat stream for conversationId: {}, userId: {}, question: {}, preIntent: {}", conversationId, userId, question, preIntent.intent().value());
+        Map<String, Object> contextParams = new java.util.LinkedHashMap<>();
+        contextParams.put(ChatMemory.CONVERSATION_ID, conversationId);
+        contextParams.put("userId", userId);
+        contextParams.put("preRecognizedIntent", preIntent);
+        if (extraContext != null) {
+            contextParams.putAll(extraContext);
+        }
         Flux<ChatClientResponse> flux = chatClientBuilder.build().prompt()
                 .advisors(advisors(preIntent).toArray(CallAdvisor[]::new))
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId)
-                        .param("userId", userId)
-                        .param("preRecognizedIntent", preIntent))
+                .advisors(advisor -> contextParams.forEach(advisor::param))
                 // 将用户ID作为上下文传给工具调用，以便工具调用时可以获取到用户相关信息
                 .toolContext(Map.of("userId", userId))
                 .user(question)
@@ -185,12 +212,21 @@ public class AgentChatService {
                 new IllegalStateException("Agent stream timed out after 30s", ex));
     }
 
-    private ChatClientResponse executeCall(String question, String conversationId, String userId, IntentRecognitionResult preIntent) {
+    private ChatClientResponse executeCall(String question,
+                                           String conversationId,
+                                           String userId,
+                                           IntentRecognitionResult preIntent,
+                                           Map<String, Object> extraContext) {
+        Map<String, Object> contextParams = new java.util.LinkedHashMap<>();
+        contextParams.put(ChatMemory.CONVERSATION_ID, conversationId);
+        contextParams.put("userId", userId);
+        contextParams.put("preRecognizedIntent", preIntent);
+        if (extraContext != null) {
+            contextParams.putAll(extraContext);
+        }
         return chatClientBuilder.build().prompt()
                 .advisors(advisors(preIntent).toArray(CallAdvisor[]::new))
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId)
-                        .param("userId", userId)
-                        .param("preRecognizedIntent", preIntent))
+                .advisors(advisor -> contextParams.forEach(advisor::param))
                 .toolContext(Map.of("userId", userId))
                 .user(question)
                 .call()
