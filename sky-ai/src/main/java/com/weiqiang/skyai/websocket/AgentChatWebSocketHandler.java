@@ -198,6 +198,34 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             sendError(session, "Invalid confirmation intent");
             return;
         }
+
+        TaskPlanningResult planningResult = taskOrchestratorService.plan(pendingQuestion, conversationId, userId, confirmedIntent);
+        if (planningResult.decomposed() && planningResult.plan() != null) {
+            send(session, new AgentChatStepStartFrame("step_start", 1, planningResult.plan().steps().get(0).intent().value()));
+            TaskExecutionOutcome outcome = taskOrchestratorService.executePlan(
+                    pendingQuestion,
+                    conversationId,
+                    userId,
+                    confirmedIntent,
+                    planningResult.plan()
+            );
+            if (outcome.waitingForConfirmation()) {
+                session.getAttributes().put(PENDING_QUESTION_KEY, pendingQuestion);
+                session.getAttributes().put(PENDING_INTENT_KEY, PLAN_CONFIRM_INTENT);
+                session.getAttributes().put(PENDING_INTENT_RESULT_KEY, confirmedIntent);
+                sendConfirmation(session, new AgentChatConfirmationFrame(
+                        "confirmation",
+                        PLAN_CONFIRM_INTENT,
+                        null,
+                        "下一步将执行高风险操作，确认后继续",
+                        "This plan is waiting for confirmation before continuing."
+                ));
+                return;
+            }
+            sendPlanOutcome(session, outcome, confirmedIntent);
+            return;
+        }
+
         startStreaming(session, pendingQuestion, conversationId, userId, confirmedIntent);
     }
 

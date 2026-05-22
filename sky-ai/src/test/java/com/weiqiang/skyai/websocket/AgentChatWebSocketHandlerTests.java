@@ -5,6 +5,9 @@ import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.task.TaskOrchestratorService;
+import com.weiqiang.skyai.task.model.TaskExecutionOutcome;
+import com.weiqiang.skyai.task.model.TaskPlan;
+import com.weiqiang.skyai.task.model.TaskStep;
 import com.weiqiang.skyai.task.model.TaskPlanningResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -151,6 +154,64 @@ class AgentChatWebSocketHandlerTests {
         assertNull(session.getAttributes().get("activeConversationId"));
         assertNull(session.getAttributes().get("pendingQuestion"));
         assertNull(session.getAttributes().get("pendingIntent"));
+        verify(agentChatService, never()).streamChat(any(), any(), any(), any(IntentRecognitionResult.class));
+    }
+
+    @Test
+    void confirmationShouldReenterPlanExecutionForBatchCancel() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+
+        IntentRecognitionResult pendingIntentResult = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_ids", "1779351452612,1779341664613"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                true,
+                "请确认取消这两个订单。"
+        );
+        IntentRecognitionResult confirmedIntent = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_ids", "1779351452612,1779341664613"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                false,
+                null
+        );
+        TaskPlan plan = new TaskPlan("p-batch", List.of(
+                new TaskStep(1, IntentType.CANCEL_ORDER, Map.of("order_id", "1779351452612"), false, "请取消目标订单。 订单号：1779351452612。"),
+                new TaskStep(2, IntentType.CANCEL_ORDER, Map.of("order_id", "1779341664613"), false, "请取消目标订单。 订单号：1779341664613。")
+        ));
+
+        when(agentChatService.confirmedIntent(eq("cancel_order"), eq(pendingIntentResult))).thenReturn(confirmedIntent);
+        when(taskOrchestratorService.plan(eq("取消这两个订单吧"), eq("conv-5"), eq("user-1"), any(IntentRecognitionResult.class)))
+                .thenReturn(new TaskPlanningResult(true, plan));
+        when(taskOrchestratorService.executePlan(eq("取消这两个订单吧"), eq("conv-5"), eq("user-1"), any(IntentRecognitionResult.class), eq(plan)))
+                .thenReturn(new TaskExecutionOutcome(true, false, "两个订单已取消", null, null, List.of("已取消订单1779351452612", "已取消订单1779341664613")));
+
+        session.getAttributes().put("pendingQuestion", "取消这两个订单吧");
+        session.getAttributes().put("pendingIntent", "cancel_order");
+        session.getAttributes().put("pendingIntentResult", pendingIntentResult);
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-5\",\"userId\":\"user-1\",\"confirmation\":true,\"intent\":\"cancel_order\"}"));
+
+        assertEquals("step_start", objectMapper.readTree(frames.get(0)).path("type").asText());
+        assertTrue(frames.stream().anyMatch(frame -> {
+            try {
+                return "plan_complete".equals(objectMapper.readTree(frame).path("type").asText());
+            } catch (Exception ex) {
+                return false;
+            }
+        }));
+        assertEquals("done", objectMapper.readTree(frames.get(frames.size() - 1)).path("type").asText());
+        verify(taskOrchestratorService).plan(eq("取消这两个订单吧"), eq("conv-5"), eq("user-1"), any(IntentRecognitionResult.class));
+        verify(taskOrchestratorService).executePlan(eq("取消这两个订单吧"), eq("conv-5"), eq("user-1"), any(IntentRecognitionResult.class), eq(plan));
         verify(agentChatService, never()).streamChat(any(), any(), any(), any(IntentRecognitionResult.class));
     }
 

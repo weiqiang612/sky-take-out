@@ -84,6 +84,7 @@ public class AgentChatService {
     }
 
     public String askStep(String question, String conversationId, String userId, IntentRecognitionResult stepIntent) {
+        log.info("Executing step conversationId={} intent={} question={}", conversationId, stepIntent.intent().value(), question);
         ChatClientResponse response = executeCall(
                 question,
                 conversationId,
@@ -94,7 +95,9 @@ public class AgentChatService {
                         "skipProfileInjection", true
                 )
         );
-        return extractAnswer(response);
+        String answer = extractAnswer(response);
+        log.info("Step answer received conversationId={} answerLength={}", conversationId, answer.length());
+        return answer;
     }
 
     public List<CallAdvisor> advisors(IntentRecognitionResult preIntent) {
@@ -138,7 +141,7 @@ public class AgentChatService {
     }
 
     public AgentChatConfirmationFrame confirmationFrame(IntentRecognitionResult intentResult) {
-        String orderId = intentResult.entities() == null ? null : intentResult.entities().get("order_id");
+        String orderId = orderReferenceText(intentResult);
         return new AgentChatConfirmationFrame(
                 "confirmation",
                 intentResult.intent().value(),
@@ -252,10 +255,44 @@ public class AgentChatService {
     }
 
     private String buildQuestion(String prefix, IntentRecognitionResult intentResult) {
-        String orderId = intentResult.entities() == null ? null : intentResult.entities().get("order_id");
+        String orderId = orderReferenceText(intentResult);
         if (StringUtils.hasText(orderId)) {
             return prefix + " " + orderId + "?";
         }
         return prefix + "?";
+    }
+
+    private String orderReferenceText(IntentRecognitionResult intentResult) {
+        if (intentResult == null || intentResult.entities() == null || intentResult.entities().isEmpty()) {
+            return null;
+        }
+
+        java.util.LinkedHashSet<String> orderRefs = new java.util.LinkedHashSet<>();
+        String orderIds = intentResult.entities().get("order_ids");
+        if (StringUtils.hasText(orderIds)) {
+            for (String part : orderIds.split("[,，;；\\s]+")) {
+                if (StringUtils.hasText(part)) {
+                    orderRefs.add(part.trim());
+                }
+            }
+        }
+
+        String orderId = intentResult.entities().get("order_id");
+        if (StringUtils.hasText(orderId)) {
+            orderRefs.add(orderId.trim());
+        }
+
+        for (Map.Entry<String, String> entry : intentResult.entities().entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key != null && key.matches("order_id_\\d+") && StringUtils.hasText(value)) {
+                orderRefs.add(value.trim());
+            }
+        }
+
+        if (orderRefs.isEmpty()) {
+            return null;
+        }
+        return String.join("、", orderRefs);
     }
 }

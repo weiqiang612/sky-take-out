@@ -1,5 +1,7 @@
 package com.weiqiang.skyai.task;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.task.model.TaskExecutionOutcome;
@@ -8,16 +10,21 @@ import com.weiqiang.skyai.task.model.TaskPlan;
 import com.weiqiang.skyai.task.model.TaskPlanningResult;
 import com.weiqiang.skyai.task.model.TaskStep;
 import com.weiqiang.skyai.websocket.AgentChatService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 public class TaskOrchestratorService {
+
+    private static final ObjectMapper ORDER_OUTPUT_MAPPER = new ObjectMapper();
 
     private final TaskPlanner taskPlanner;
     private final TaskExecutionStateRepository stateRepository;
@@ -32,7 +39,10 @@ public class TaskOrchestratorService {
     }
 
     public TaskPlanningResult plan(String question, String conversationId, String userId, IntentRecognitionResult preIntent) {
-        return taskPlanner.plan(question, preIntent, List.of());
+        TaskPlanningResult result = taskPlanner.plan(question, preIntent, List.of());
+        log.info("Plan created for conversationId={}: decomposed={}, steps={}", conversationId, result.decomposed(),
+                result.decomposed() ? result.plan().steps().size() : 0);
+        return result;
     }
 
     public TaskExecutionOutcome executePlan(String question,
@@ -40,7 +50,7 @@ public class TaskOrchestratorService {
                                             String userId,
                                             IntentRecognitionResult preIntent,
                                             TaskPlan plan) {
-        // 保存执行状态，默认从第0步开始执行
+        log.info("Starting plan execution conversationId={} userId={} question={} steps={}", conversationId, userId, question, plan.steps().size());
         TaskExecutionState state = TaskExecutionState.start(conversationId, userId, question, plan);
         stateRepository.save(state);
         // 直接执行，直到需要用户确认或者执行完成
@@ -48,37 +58,40 @@ public class TaskOrchestratorService {
     }
 
     public TaskExecutionOutcome continueAfterConfirmation(String conversationId, String userId) {
+        log.info("Confirmation received conversationId={} userId={}", conversationId, userId);
         TaskExecutionState state = stateRepository.findByConversationId(conversationId);
         if (state == null) {
+            log.warn("No state found for conversationId={}", conversationId);
             return new TaskExecutionOutcome(false, false, "", null, null, List.of());
         }
         if (!StringUtils.hasText(userId) || !userId.equals(state.userId())) {
+            log.warn("UserId mismatch: provided={}, expected={}", userId, state.userId());
             return new TaskExecutionOutcome(false, false, "", null, null, List.of());
         }
-        if (state.waitingConfirmationStep() == null
-                || state.waitingConfirmationStep() < 0
-                || state.waitingConfirmationStep() >= state.plan().steps().size()) {
+        Integer waitingStep = state.waitingConfirmationStep();
+        if (waitingStep == null || waitingStep < 0 || waitingStep >= state.plan().steps().size()) {
+            log.warn("Invalid waitingConfirmationStep={} for conversationId={}", waitingStep, conversationId);
             return new TaskExecutionOutcome(false, false, "", null, null, List.of());
         }
         return continueExecution(state, true);
     }
 
     public void abandon(String conversationId) {
+        log.info("Plan abandoned conversationId={}", conversationId);
         stateRepository.deleteByConversationId(conversationId);
     }
 
     private TaskExecutionOutcome continueExecution(TaskExecutionState state, boolean confirmationGranted) {
-        // 任务执行结果摘要列表，用于最后总结输出
         List<String> summaries = new ArrayList<>();
         TaskExecutionState current = state;
         List<TaskStep> steps = current.plan().steps();
         int index = current.nextStepIndex();
-        // 循环执行每一步，直到需要用户确认或者执行完成
+        log.info("Continuing execution conversationId={} from stepIndex={} totalSteps={}", current.conversationId(), index, steps.size());
         while (index < steps.size()) {
             TaskStep step = steps.get(index);
 
-            // 1. 需要人工确认的步骤，先保存状态，等待用户确认后再继续执行
             if (step.requiresConfirmation()) {
+                log.info("Step {} requires confirmation, suspending execution", step.stepNumber());
                 if (!confirmationGranted || current.waitingConfirmationStep() == null) {
                     TaskExecutionState waiting = current.withWaitingConfirmation(index);
                     stateRepository.save(waiting);
@@ -100,7 +113,7 @@ public class TaskOrchestratorService {
                 }
             }
 
-            // 2. 否则直接执行当前步骤，保存输出结果，继续执行下一步
+            log.info("Executing step {}/{} intent={}", step.stepNumber(), steps.size(), step.intent().value());
             Map<String, String> mergedEntities = mergedEntitiesFor(step, current);
             IntentRecognitionResult stepIntent = new IntentRecognitionResult(
                     step.intent(),
@@ -117,6 +130,7 @@ public class TaskOrchestratorService {
             Map<String, String> stepOutputs = new LinkedHashMap<>();
             if (StringUtils.hasText(answer)) {
                 stepOutputs.put("step_" + step.stepNumber() + "_answer", answer);
+                stepOutputs.putAll(extractOrderOutputs(answer));
             }
             // 更新状态，继续执行下一步
             current = current.afterStep(index, stepOutputs);
@@ -125,7 +139,7 @@ public class TaskOrchestratorService {
             index = current.nextStepIndex();
         }
 
-        // 所有步骤执行完成，删除状态，输出总结
+        log.info("All {} steps completed conversationId={}", steps.size(), current.conversationId());
         String finalAnswer = summarize(summaries);
         IntentRecognitionResult doneIntent = new IntentRecognitionResult(
                 steps.get(Math.max(0, steps.size() - 1)).intent(),
@@ -143,13 +157,13 @@ public class TaskOrchestratorService {
 
     private Map<String, String> mergedEntitiesFor(TaskStep step, TaskExecutionState current) {
         Map<String, String> mergedEntities = new LinkedHashMap<>();
-        // 当前步骤的实体优先级最高，覆盖之前的同名实体
         if (step.entities() != null) {
             mergedEntities.putAll(step.entities());
         }
         if (current.stepOutputs() != null) {
             mergedEntities.putAll(current.stepOutputs());
         }
+        log.debug("Merged entities for step {}: {}", step.stepNumber(), mergedEntities);
         return mergedEntities;
     }
 
@@ -172,5 +186,86 @@ public class TaskOrchestratorService {
             return summaries.get(0) + "，同时" + summaries.get(1);
         }
         return "先" + summaries.get(0) + "，然后" + summaries.get(1) + "，最后" + summaries.get(2);
+    }
+
+    private Map<String, String> extractOrderOutputs(String answer) {
+        Map<String, String> outputs = new LinkedHashMap<>();
+        if (!StringUtils.hasText(answer)) {
+            return outputs;
+        }
+
+        JsonNode root = readJson(answer);
+        if (root == null || root.isMissingNode() || root.isNull()) {
+            return outputs;
+        }
+
+        List<String> orderIds = new ArrayList<>();
+        if (root.hasNonNull("order_ids")) {
+            JsonNode orderIdsNode = root.get("order_ids");
+            if (orderIdsNode.isArray()) {
+                orderIdsNode.forEach(node -> addOrderId(orderIds, node.asText(null)));
+            } else {
+                String value = orderIdsNode.asText(null);
+                if (StringUtils.hasText(value)) {
+                    for (String part : value.split("[,，;；\\s]+")) {
+                        addOrderId(orderIds, part);
+                    }
+                }
+            }
+        }
+        if (root.hasNonNull("order_id")) {
+            addOrderId(orderIds, root.get("order_id").asText(null));
+        }
+        for (int i = 1; i <= 3; i++) {
+            String key = "order_id_" + i;
+            if (root.hasNonNull(key)) {
+                addOrderId(orderIds, root.get(key).asText(null));
+            }
+        }
+
+        if (orderIds.isEmpty()) {
+            return outputs;
+        }
+
+        LinkedHashSet<String> unique = new LinkedHashSet<>(orderIds);
+        List<String> canonical = new ArrayList<>(unique);
+        outputs.put("order_ids", String.join(",", canonical));
+        outputs.put("order_id", canonical.get(0));
+        for (int i = 0; i < canonical.size() && i < 3; i++) {
+            outputs.put("order_id_" + (i + 1), canonical.get(i));
+        }
+        return outputs;
+    }
+
+    private JsonNode readJson(String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            String candidate = text.trim();
+            int firstBrace = candidate.indexOf('{');
+            int lastBrace = candidate.lastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace > firstBrace) {
+                candidate = candidate.substring(firstBrace, lastBrace + 1);
+            }
+            return ORDER_OUTPUT_MAPPER.readTree(candidate);
+        } catch (Exception ex) {
+            log.debug("Unable to parse structured step output: {}", answerPreview(text));
+            return null;
+        }
+    }
+
+    private void addOrderId(List<String> orderIds, String orderId) {
+        if (StringUtils.hasText(orderId)) {
+            orderIds.add(orderId.trim());
+        }
+    }
+
+    private String answerPreview(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        String trimmed = text.trim();
+        return trimmed.length() <= 120 ? trimmed : trimmed.substring(0, 120);
     }
 }

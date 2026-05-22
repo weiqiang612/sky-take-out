@@ -92,6 +92,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
     private String buildContextBlock(ChatClientRequest request, IntentRecognitionResult intentResult, String userId) {
         if (Boolean.TRUE.equals(currentFlag(request, "skipProfileInjection"))) {
+            log.debug("skipProfileInjection enabled, returning empty context block");
             return "";
         }
         IntentType intentType = intentResult == null ? IntentType.OTHER : intentResult.intent();
@@ -334,10 +335,12 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         if (!StringUtils.hasText(overrideIntent)) {
             return intentResult;
         }
+        log.debug("Overriding intent from {} to {}", intentResult == null ? null : intentResult.intent(), overrideIntent);
         IntentType intentType;
         try {
             intentType = IntentType.fromValue(overrideIntent);
         } catch (Exception ex) {
+            log.warn("Failed to parse override intent: {}", overrideIntent);
             return intentResult;
         }
         Map<String, String> entities = intentResult == null || intentResult.entities() == null ? Map.of() : intentResult.entities();

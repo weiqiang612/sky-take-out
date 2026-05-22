@@ -108,6 +108,36 @@ class AgentChatServiceTests {
     }
 
     @Test
+    void confirmationFrameShouldIncludeMultipleOrderIds() {
+        AgentChatService service = new AgentChatService(
+                mock(ChatClient.Builder.class),
+                mock(IntentRecognitionAdvisor.class),
+                mock(UserContextAdvisor.class),
+                mock(MessageChatMemoryAdvisor.class),
+                mock(RagAdvisor.class),
+                mock(ToolFilterAdvisor.class),
+                mock(SafeToolCallAdvisor.class),
+                mock(MemoryWriterService.class),
+                mock(CustomerIntentRecognitionService.class),
+                mock(ChatHistoryService.class)
+        );
+
+        IntentRecognitionResult result = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_ids", "12345,67890"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                true,
+                null
+        );
+
+        assertEquals("confirmation", service.confirmationFrame(result).type());
+        assertEquals("12345、67890", service.confirmationFrame(result).orderId());
+        assertEquals("是否确认取消订单 12345、67890?", service.confirmationQuestion(result));
+    }
+
+    @Test
     void confirmedIntentShouldRejectInvalidValue() {
         AgentChatService service = new AgentChatService(
                 mock(ChatClient.Builder.class),

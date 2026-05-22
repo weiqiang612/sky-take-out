@@ -2,12 +2,14 @@ package com.weiqiang.skyai.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.task.model.TaskExecutionState;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 
+@Slf4j
 @Repository
 public class RedisTaskExecutionStateRepository implements TaskExecutionStateRepository {
 
@@ -29,6 +31,7 @@ public class RedisTaskExecutionStateRepository implements TaskExecutionStateRepo
         }
         try {
             redisTemplate.opsForValue().set(key(state.conversationId()), objectMapper.writeValueAsString(state), TTL);
+            log.debug("Saved task execution state conversationId={} nextStepIndex={}", state.conversationId(), state.nextStepIndex());
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to persist task execution state", ex);
         }
@@ -41,11 +44,15 @@ public class RedisTaskExecutionStateRepository implements TaskExecutionStateRepo
         }
         String value = redisTemplate.opsForValue().get(key(conversationId));
         if (!StringUtils.hasText(value)) {
+            log.debug("No task state found for conversationId={}", conversationId);
             return null;
         }
         try {
-            return objectMapper.readValue(value, TaskExecutionState.class);
+            TaskExecutionState state = objectMapper.readValue(value, TaskExecutionState.class);
+            log.debug("Found task state conversationId={} nextStepIndex={}", conversationId, state.nextStepIndex());
+            return state;
         } catch (Exception ex) {
+            log.warn("Failed to deserialize task state for conversationId={}", conversationId, ex);
             return null;
         }
     }
@@ -56,6 +63,7 @@ public class RedisTaskExecutionStateRepository implements TaskExecutionStateRepo
             return;
         }
         redisTemplate.delete(key(conversationId));
+        log.debug("Deleted task state for conversationId={}", conversationId);
     }
 
     private String key(String conversationId) {
