@@ -22,6 +22,7 @@ import java.util.UUID;
 public class RuleBasedTaskPlanner implements TaskPlanner {
 
     private static final int MAX_STEPS = 3;
+    private static final int MAX_LOOKUP_DRIVEN_ORDER_COUNT = 3;
 
     @Override
     public TaskPlanningResult plan(String question, IntentRecognitionResult recognizedIntent, List<String> history) {
@@ -136,7 +137,11 @@ public class RuleBasedTaskPlanner implements TaskPlanner {
         }
 
         int requestedCount = parseOrderCount(recognizedIntent.entities());
-        if (requestedCount < 2 || requestedCount > MAX_STEPS) {
+        if (requestedCount < 2 || requestedCount > MAX_LOOKUP_DRIVEN_ORDER_COUNT) {
+            if (requestedCount != -1) {
+                log.warn("Lookup-driven cancel request rejected for question={} because order_count={} is outside supported range 2..{}",
+                        question, requestedCount, MAX_LOOKUP_DRIVEN_ORDER_COUNT);
+            }
             return TaskPlanningResult.notDecomposed();
         }
         if (!containsLookupHint(question, recognizedIntent.entities())) {
@@ -260,7 +265,7 @@ public class RuleBasedTaskPlanner implements TaskPlanner {
         try {
             return Integer.parseInt(orderCount.trim());
         } catch (NumberFormatException ex) {
-            log.debug("Invalid order_count value: {}", orderCount);
+            log.warn("Invalid order_count value: {}", orderCount);
             return -1;
         }
     }

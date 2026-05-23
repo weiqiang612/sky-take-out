@@ -5,6 +5,9 @@ import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.task.model.TaskPlanningResult;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.util.List;
 import java.util.Map;
@@ -14,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@ExtendWith(OutputCaptureExtension.class)
 class RuleBasedTaskPlannerTests {
 
     @Test
@@ -134,7 +138,7 @@ class RuleBasedTaskPlannerTests {
     }
 
     @Test
-    void planShouldRejectLookupDrivenCancelBeyondThreeOrders() {
+    void planShouldRejectLookupDrivenCancelBeyondThreeOrders(CapturedOutput output) {
         RuleBasedTaskPlanner planner = new RuleBasedTaskPlanner();
         IntentRecognitionResult intent = new IntentRecognitionResult(
                 IntentType.CANCEL_ORDER,
@@ -150,5 +154,6 @@ class RuleBasedTaskPlannerTests {
 
         assertFalse(result.decomposed());
         assertNull(result.plan());
+        assertTrue(output.getOut().contains("outside supported range 2..3"));
     }
 }

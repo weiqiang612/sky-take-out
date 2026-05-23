@@ -155,7 +155,12 @@ public class TaskOrchestratorService {
             Map<String, String> stepOutputs = new LinkedHashMap<>();
             if (StringUtils.hasText(answer)) {
                 stepOutputs.put("step_" + step.stepNumber() + "_answer", answer);
-                stepOutputs.putAll(extractOrderOutputs(answer));
+                Map<String, String> orderOutputs = extractOrderOutputs(answer);
+                if (orderOutputs.isEmpty() && isRecentOrderLookup(step)) {
+                    log.warn("Step {} order lookup returned no parseable order IDs conversationId={} answerPreview={}",
+                            step.stepNumber(), current.conversationId(), answerPreview(answer));
+                }
+                stepOutputs.putAll(orderOutputs);
             }
             String validationError = validateStepOutcome(step, current, stepOutputs);
             if (StringUtils.hasText(validationError)) {
@@ -284,6 +289,12 @@ public class TaskOrchestratorService {
             int expectedCount = parseExpectedLookupCount(step);
             List<String> resolvedOrderIds = orderedLookupOrderIds(stepOutputs);
             if (expectedCount > 0 && resolvedOrderIds.size() < expectedCount) {
+                String lookupAnswerPreview = answerPreview(stepOutputs.get("step_" + step.stepNumber() + "_answer"));
+                if (!StringUtils.hasText(lookupAnswerPreview)) {
+                    lookupAnswerPreview = answerPreview(stepOutputs.get("order_ids"));
+                }
+                log.warn("Lookup-driven order lookup failed conversationId={} step={} expectedCount={} resolvedCount={} answerPreview={}",
+                        current.conversationId(), step.stepNumber(), expectedCount, resolvedOrderIds.size(), lookupAnswerPreview);
                 return "订单查询结果不足，期望 " + expectedCount + " 个订单ID，但只得到 " + resolvedOrderIds.size() + " 个";
             }
         }
@@ -379,11 +390,22 @@ public class TaskOrchestratorService {
         if (state.startedAtMillis() != null && state.deadlineAtMillis() != null) {
             return state;
         }
-        long startedAtMillis = state.startedAtMillis() != null ? state.startedAtMillis() : System.currentTimeMillis();
-        long deadlineAtMillis = state.deadlineAtMillis() != null
-                ? state.deadlineAtMillis()
-                : startedAtMillis + buildPlanTimeoutMillis(state.plan());
-        return state.withTiming(startedAtMillis, deadlineAtMillis);
+        long budgetMillis = buildPlanTimeoutMillis(state.plan());
+        if (state.startedAtMillis() != null) {
+            long deadlineAtMillis = state.startedAtMillis() + budgetMillis;
+            log.warn("Restoring missing deadline from persisted task state conversationId={} planId={}",
+                    state.conversationId(), state.planId());
+            return state.withTiming(state.startedAtMillis(), deadlineAtMillis);
+        }
+        if (state.deadlineAtMillis() != null) {
+            long startedAtMillis = Math.max(0L, state.deadlineAtMillis() - budgetMillis);
+            log.warn("Restoring missing startedAtMillis from persisted task state conversationId={} planId={}",
+                    state.conversationId(), state.planId());
+            return state.withTiming(startedAtMillis, state.deadlineAtMillis());
+        }
+        log.warn("Persisted task state is missing both timing fields conversationId={} planId={}, marking as expired",
+                state.conversationId(), state.planId());
+        return state.withTiming(0L, 0L);
     }
 
     private long buildPlanTimeoutMillis(TaskPlan plan) {

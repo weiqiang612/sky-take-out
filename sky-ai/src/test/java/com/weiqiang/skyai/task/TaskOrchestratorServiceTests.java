@@ -8,8 +8,12 @@ import com.weiqiang.skyai.task.model.TaskPlan;
 import com.weiqiang.skyai.task.model.TaskStep;
 import com.weiqiang.skyai.websocket.AgentChatService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,6 +30,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class TaskOrchestratorServiceTests {
 
     @Test
@@ -142,6 +147,34 @@ class TaskOrchestratorServiceTests {
     }
 
     @Test
+    void executePlanShouldWarnWhenLookupStepReturnsNaturalLanguageInsteadOfJson(CapturedOutput output) {
+        TaskPlanner planner = mock(TaskPlanner.class);
+        TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService service = new TaskOrchestratorService(planner, repository, agentChatService);
+
+        TaskPlan plan = new TaskPlan("p-lookup-text", List.of(
+                new TaskStep(1, IntentType.ORDER_STATUS, Map.of("query_mode", "recent_orders", "order_count", "2", "order_status", "not_delivered"), false, "请先查询最近的 2 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"),
+                new TaskStep(2, IntentType.CANCEL_ORDER, Map.of("target_order_slot", "order_id_1"), true, "请取消第一个目标订单。"),
+                new TaskStep(3, IntentType.CANCEL_ORDER, Map.of("target_order_slot", "order_id_2"), false, "请取消第二个目标订单。")
+        ));
+        when(agentChatService.askStep(eq("请先查询最近的 2 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"), any(), any(), any()))
+                .thenReturn("您的两个订单分别是 1779351452612 和 1779341664613，请取消它们。");
+
+        TaskExecutionOutcome outcome = service.executePlan("帮我看看最近的两个没有送到的订单，给我退掉", "c-lookup-text", "u-lookup-text", mock(IntentRecognitionResult.class), plan);
+
+        assertFalse(outcome.completed());
+        assertFalse(outcome.waitingForConfirmation());
+        assertEquals(1, outcome.stepSummaries().size());
+        assertTrue(outcome.finalAnswer().contains("订单查询结果不足"));
+        assertTrue(output.getOut().contains("Unable to parse structured step output"));
+        verify(agentChatService).askStep(eq("请先查询最近的 2 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"), eq("c-lookup-text"), eq("u-lookup-text"), any());
+        verify(agentChatService, never()).askStep(eq("请取消第一个目标订单。"), any(), any(), any());
+        verify(agentChatService, never()).askStep(eq("请取消第二个目标订单。"), any(), any(), any());
+        verify(repository).deleteByConversationId("c-lookup-text");
+    }
+
+    @Test
     void executePlanShouldStopRemainingStepsWhenAStepThrows() {
         TaskPlanner planner = mock(TaskPlanner.class);
         TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
@@ -197,6 +230,47 @@ class TaskOrchestratorServiceTests {
     }
 
     @Test
+    void continueAfterConfirmationShouldRestoreMissingStartedAtWithoutResettingDeadline() {
+        TaskPlanner planner = mock(TaskPlanner.class);
+        TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService service = new TaskOrchestratorService(planner, repository, agentChatService);
+
+        AtomicReference<TaskExecutionState> savedState = new AtomicReference<>();
+        doAnswer(invocation -> {
+            savedState.set(invocation.getArgument(0));
+            return null;
+        }).when(repository).save(any());
+
+        long originalDeadline = System.currentTimeMillis() + 60000L;
+        TaskPlan plan = new TaskPlan("p-partial-timeout", List.of(
+                new TaskStep(1, IntentType.CANCEL_ORDER, Map.of("order_id", "123"), true, "请取消订单123。")
+        ));
+        TaskExecutionState partialTimingState = new TaskExecutionState(
+                "p-partial-timeout",
+                "c-partial-timeout",
+                "u-partial-timeout",
+                "取消订单",
+                plan,
+                null,
+                originalDeadline,
+                0,
+                0,
+                new LinkedHashMap<>()
+        );
+        when(repository.findByConversationId("c-partial-timeout")).thenReturn(partialTimingState);
+        when(agentChatService.askStep(eq("请取消订单123。"), any(), any(), any())).thenReturn("已取消订单123");
+
+        TaskExecutionOutcome outcome = service.continueAfterConfirmation("c-partial-timeout", "u-partial-timeout");
+
+        assertTrue(outcome.completed());
+        assertTrue(savedState.get().startedAtMillis() != null);
+        assertEquals(originalDeadline, savedState.get().deadlineAtMillis());
+        verify(agentChatService).askStep(eq("请取消订单123。"), eq("c-partial-timeout"), eq("u-partial-timeout"), any());
+        verify(repository).findByConversationId("c-partial-timeout");
+    }
+
+    @Test
     void continueAfterConfirmationShouldRespectStoredDeadline() {
         TaskPlanner planner = mock(TaskPlanner.class);
         TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
@@ -224,6 +298,39 @@ class TaskOrchestratorServiceTests {
         assertTrue(outcome.finalAnswer().contains("任务执行超时"));
         verify(agentChatService, never()).askStep(any(), any(), any(), any());
         verify(repository).deleteByConversationId("c-confirm-timeout");
+    }
+
+    @Test
+    void continueAfterConfirmationShouldFailWhenBothTimingFieldsAreMissing() {
+        TaskPlanner planner = mock(TaskPlanner.class);
+        TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService service = new TaskOrchestratorService(planner, repository, agentChatService);
+
+        TaskPlan plan = new TaskPlan("p-missing-time", List.of(
+                new TaskStep(1, IntentType.CANCEL_ORDER, Map.of("order_id", "456"), true, "请取消订单456。")
+        ));
+        TaskExecutionState state = new TaskExecutionState(
+                "p-missing-time",
+                "c-missing-time",
+                "u-missing-time",
+                "取消订单",
+                plan,
+                null,
+                null,
+                0,
+                0,
+                new LinkedHashMap<>()
+        );
+        when(repository.findByConversationId("c-missing-time")).thenReturn(state);
+
+        TaskExecutionOutcome outcome = service.continueAfterConfirmation("c-missing-time", "u-missing-time");
+
+        assertFalse(outcome.completed());
+        assertFalse(outcome.waitingForConfirmation());
+        assertTrue(outcome.finalAnswer().contains("任务执行超时"));
+        verify(agentChatService, never()).askStep(any(), any(), any(), any());
+        verify(repository).deleteByConversationId("c-missing-time");
     }
 
     @Test
