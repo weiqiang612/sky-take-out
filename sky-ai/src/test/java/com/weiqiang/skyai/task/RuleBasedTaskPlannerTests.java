@@ -64,10 +64,10 @@ class RuleBasedTaskPlannerTests {
     void planShouldBuildMultiIntentPlanWithoutConnectorWords() {
         RuleBasedTaskPlanner planner = new RuleBasedTaskPlanner();
         IntentRecognitionResult intent = new IntentRecognitionResult(
-                IntentType.ORDER_STATUS,
+                IntentType.CANCEL_ORDER,
                 ConfidenceLevel.HIGH,
                 Map.of(),
-                List.of(IntentType.ORDER_STATUS, IntentType.CANCEL_ORDER),
+                List.of(IntentType.REQUEST_REFUND, IntentType.ORDER_STATUS, IntentType.CANCEL_ORDER),
                 null,
                 false,
                 null
@@ -76,9 +76,10 @@ class RuleBasedTaskPlannerTests {
         TaskPlanningResult result = planner.plan("查一下再取消", intent, List.of());
 
         assertTrue(result.decomposed());
-        assertEquals(2, result.plan().steps().size());
-        assertEquals(IntentType.ORDER_STATUS, result.plan().steps().get(0).intent());
-        assertEquals(IntentType.CANCEL_ORDER, result.plan().steps().get(1).intent());
+        assertEquals(3, result.plan().steps().size());
+        assertEquals(IntentType.REQUEST_REFUND, result.plan().steps().get(0).intent());
+        assertEquals(IntentType.ORDER_STATUS, result.plan().steps().get(1).intent());
+        assertEquals(IntentType.CANCEL_ORDER, result.plan().steps().get(2).intent());
     }
 
     @Test
@@ -104,5 +105,50 @@ class RuleBasedTaskPlannerTests {
         assertFalse(result.plan().steps().get(0).requiresConfirmation());
         assertTrue(result.plan().steps().get(1).requiresConfirmation());
         assertFalse(result.plan().steps().get(2).requiresConfirmation());
+    }
+
+    @Test
+    void planShouldBuildLookupDrivenCancelPlanForThreeRecentOrders() {
+        RuleBasedTaskPlanner planner = new RuleBasedTaskPlanner();
+        IntentRecognitionResult intent = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_count", "3", "order_status", "not_delivered"),
+                List.of(IntentType.ORDER_STATUS, IntentType.CANCEL_ORDER),
+                null,
+                false,
+                null
+        );
+
+        TaskPlanningResult result = planner.plan("帮我看看最近的三个没有送到的订单，给我退掉", intent, List.of());
+
+        assertTrue(result.decomposed());
+        assertEquals(4, result.plan().steps().size());
+        assertEquals(IntentType.ORDER_STATUS, result.plan().steps().get(0).intent());
+        assertEquals(IntentType.CANCEL_ORDER, result.plan().steps().get(1).intent());
+        assertEquals(IntentType.CANCEL_ORDER, result.plan().steps().get(2).intent());
+        assertEquals(IntentType.CANCEL_ORDER, result.plan().steps().get(3).intent());
+        assertTrue(result.plan().steps().get(1).requiresConfirmation());
+        assertFalse(result.plan().steps().get(2).requiresConfirmation());
+        assertFalse(result.plan().steps().get(3).requiresConfirmation());
+    }
+
+    @Test
+    void planShouldRejectLookupDrivenCancelBeyondThreeOrders() {
+        RuleBasedTaskPlanner planner = new RuleBasedTaskPlanner();
+        IntentRecognitionResult intent = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_count", "4", "order_status", "not_delivered"),
+                List.of(IntentType.ORDER_STATUS, IntentType.CANCEL_ORDER),
+                null,
+                false,
+                null
+        );
+
+        TaskPlanningResult result = planner.plan("帮我看看最近的四个没有送到的订单，给我退掉", intent, List.of());
+
+        assertFalse(result.decomposed());
+        assertNull(result.plan());
     }
 }

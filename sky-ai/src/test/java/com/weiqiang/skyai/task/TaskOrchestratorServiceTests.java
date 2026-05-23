@@ -8,6 +8,7 @@ import com.weiqiang.skyai.task.model.TaskPlan;
 import com.weiqiang.skyai.task.model.TaskStep;
 import com.weiqiang.skyai.websocket.AgentChatService;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -110,6 +112,118 @@ class TaskOrchestratorServiceTests {
         verify(agentChatService).askStep(eq("请先查询最近的 2 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"), eq("c-query"), eq("u-query"), any());
         verify(agentChatService).askStep(eq("请取消第一个目标订单。"), eq("c-query"), eq("u-query"), any());
         verify(agentChatService).askStep(eq("请取消第二个目标订单。"), eq("c-query"), eq("u-query"), any());
+    }
+
+    @Test
+    void executePlanShouldStopLookupDrivenCancelWhenLookupDoesNotReturnEnoughOrderIds() {
+        TaskPlanner planner = mock(TaskPlanner.class);
+        TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService service = new TaskOrchestratorService(planner, repository, agentChatService);
+
+        TaskPlan plan = new TaskPlan("p-lookup-fail", List.of(
+                new TaskStep(1, IntentType.ORDER_STATUS, Map.of("query_mode", "recent_orders", "order_count", "2", "order_status", "not_delivered"), false, "请先查询最近的 2 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"),
+                new TaskStep(2, IntentType.CANCEL_ORDER, Map.of("target_order_slot", "order_id_1"), true, "请取消第一个目标订单。"),
+                new TaskStep(3, IntentType.CANCEL_ORDER, Map.of("target_order_slot", "order_id_2"), false, "请取消第二个目标订单。")
+        ));
+        when(agentChatService.askStep(eq("请先查询最近的 2 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"), any(), any(), any()))
+                .thenReturn("{\"order_ids\":\"1779351452612\"}");
+
+        TaskExecutionOutcome outcome = service.executePlan("帮我看看最近的两个没有送到的订单，给我退掉", "c-lookup-fail", "u-lookup-fail", mock(IntentRecognitionResult.class), plan);
+
+        assertFalse(outcome.completed());
+        assertFalse(outcome.waitingForConfirmation());
+        assertEquals(1, outcome.stepSummaries().size());
+        assertTrue(outcome.finalAnswer().contains("订单查询结果不足"));
+        verify(agentChatService).askStep(eq("请先查询最近的 2 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"), eq("c-lookup-fail"), eq("u-lookup-fail"), any());
+        verify(agentChatService, never()).askStep(eq("请取消第一个目标订单。"), any(), any(), any());
+        verify(agentChatService, never()).askStep(eq("请取消第二个目标订单。"), any(), any(), any());
+        verify(repository).deleteByConversationId("c-lookup-fail");
+    }
+
+    @Test
+    void executePlanShouldStopRemainingStepsWhenAStepThrows() {
+        TaskPlanner planner = mock(TaskPlanner.class);
+        TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService service = new TaskOrchestratorService(planner, repository, agentChatService);
+
+        TaskPlan plan = new TaskPlan("p-step-fail", List.of(
+                new TaskStep(1, IntentType.ORDER_STATUS, Map.of("order_id", "123"), false, "请查询订单123状态。"),
+                new TaskStep(2, IntentType.CANCEL_ORDER, Map.of("order_id", "123"), false, "请取消订单123。"),
+                new TaskStep(3, IntentType.REQUEST_REFUND, Map.of("order_id", "123"), false, "请为订单123发起退款。")
+        ));
+        when(agentChatService.askStep(eq("请查询订单123状态。"), any(), any(), any())).thenReturn("订单123已送达");
+        when(agentChatService.askStep(eq("请取消订单123。"), any(), any(), any())).thenThrow(new IllegalStateException("cancel failed"));
+
+        TaskExecutionOutcome outcome = service.executePlan("先查再取消再退款", "c-step-fail", "u-step-fail", mock(IntentRecognitionResult.class), plan);
+
+        assertFalse(outcome.completed());
+        assertFalse(outcome.waitingForConfirmation());
+        assertEquals(1, outcome.stepSummaries().size());
+        assertTrue(outcome.finalAnswer().contains("步骤 2 执行失败"));
+        verify(agentChatService).askStep(eq("请查询订单123状态。"), eq("c-step-fail"), eq("u-step-fail"), any());
+        verify(agentChatService).askStep(eq("请取消订单123。"), eq("c-step-fail"), eq("u-step-fail"), any());
+        verify(agentChatService, never()).askStep(eq("请为订单123发起退款。"), any(), any(), any());
+        verify(repository).deleteByConversationId("c-step-fail");
+    }
+
+    @Test
+    void executePlanShouldFailWhenPlanDeadlineAlreadyExpired() {
+        TaskPlanner planner = mock(TaskPlanner.class);
+        TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService service = new TaskOrchestratorService(planner, repository, agentChatService);
+
+        TaskPlan plan = new TaskPlan("p-timeout", List.of(
+                new TaskStep(1, IntentType.ORDER_STATUS, Map.of("order_id", "123"), false, "请查询订单123状态。")
+        ));
+        TaskExecutionState expiredState = TaskExecutionState.start(
+                "c-timeout",
+                "u-timeout",
+                "查询订单",
+                plan,
+                System.currentTimeMillis() - 300000,
+                System.currentTimeMillis() - 1000
+        );
+
+        TaskExecutionOutcome outcome = ReflectionTestUtils.invokeMethod(service, "continueExecution", expiredState, false);
+
+        assertFalse(outcome.completed());
+        assertFalse(outcome.waitingForConfirmation());
+        assertTrue(outcome.finalAnswer().contains("任务执行超时"));
+        verify(agentChatService, never()).askStep(any(), any(), any(), any());
+        verify(repository).deleteByConversationId("c-timeout");
+    }
+
+    @Test
+    void continueAfterConfirmationShouldRespectStoredDeadline() {
+        TaskPlanner planner = mock(TaskPlanner.class);
+        TaskExecutionStateRepository repository = mock(TaskExecutionStateRepository.class);
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService service = new TaskOrchestratorService(planner, repository, agentChatService);
+
+        TaskPlan plan = new TaskPlan("p-confirm-timeout", List.of(
+                new TaskStep(1, IntentType.CANCEL_ORDER, Map.of("order_id", "123"), true, "请取消订单123。"),
+                new TaskStep(2, IntentType.REQUEST_REFUND, Map.of("order_id", "123"), false, "请为订单123发起退款。")
+        ));
+        TaskExecutionState expiredState = TaskExecutionState.start(
+                "c-confirm-timeout",
+                "u-confirm-timeout",
+                "取消订单",
+                plan,
+                System.currentTimeMillis() - 300000,
+                System.currentTimeMillis() - 1000
+        ).withWaitingConfirmation(0);
+        when(repository.findByConversationId("c-confirm-timeout")).thenReturn(expiredState);
+
+        TaskExecutionOutcome outcome = service.continueAfterConfirmation("c-confirm-timeout", "u-confirm-timeout");
+
+        assertFalse(outcome.completed());
+        assertFalse(outcome.waitingForConfirmation());
+        assertTrue(outcome.finalAnswer().contains("任务执行超时"));
+        verify(agentChatService, never()).askStep(any(), any(), any(), any());
+        verify(repository).deleteByConversationId("c-confirm-timeout");
     }
 
     @Test

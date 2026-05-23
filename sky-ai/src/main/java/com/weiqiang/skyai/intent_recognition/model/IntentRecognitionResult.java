@@ -12,6 +12,7 @@ public record IntentRecognitionResult(
         @JsonProperty("intent") IntentType intent,
         @JsonProperty("confidence") ConfidenceLevel confidence,
         @JsonProperty("entities") Map<String, String> entities,
+        // 按模型给出的优先级顺序排列，planner 需要保持该顺序，不要自行重排
         @JsonProperty("possible_intents") List<IntentType> possibleIntents,
         // 需要澄清的问题
         @JsonProperty("clarification_question") @Nullable String clarificationQuestion,

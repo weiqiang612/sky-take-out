@@ -30,16 +30,23 @@ public class RuleBasedTaskPlanner implements TaskPlanner {
             return TaskPlanningResult.notDecomposed();
         }
 
+        // 1. batch cancel plan has highest priority since it requires specific handling and is easy to identify
         TaskPlanningResult batchCancelPlan = buildBatchCancelPlan(recognizedIntent);
         if (batchCancelPlan.decomposed()) {
             return batchCancelPlan;
         }
 
+        // 2. lookup-driven cancel plan is a special pattern that can be identified by the presence of lookup hints and absence of explicit order IDs, so we check it before the more general multi-intent plan
         TaskPlanningResult lookupDrivenCancelPlan = buildLookupDrivenCancelPlan(question, recognizedIntent);
         if (lookupDrivenCancelPlan.decomposed()) {
             return lookupDrivenCancelPlan;
         }
+        if (isLookupDrivenCancelRequest(question, recognizedIntent)) {
+            log.debug("Lookup-driven cancel request rejected for question={}", question);
+            return TaskPlanningResult.notDecomposed();
+        }
 
+        // 3. multi-intent plan is more general and can apply to various combinations of intents, so we check it last
         TaskPlanningResult multiIntentPlan = buildMultiIntentPlan(recognizedIntent);
         if (multiIntentPlan.decomposed()) {
             return multiIntentPlan;
@@ -51,9 +58,6 @@ public class RuleBasedTaskPlanner implements TaskPlanner {
 
     private TaskPlanningResult buildMultiIntentPlan(IntentRecognitionResult recognizedIntent) {
         Set<IntentType> intents = new LinkedHashSet<>();
-        if (recognizedIntent.intent().isTask()) {
-            intents.add(recognizedIntent.intent());
-        }
         if (recognizedIntent.possibleIntents() != null) {
             for (IntentType possible : recognizedIntent.possibleIntents()) {
                 if (possible != null && possible.isTask()) {
@@ -132,7 +136,7 @@ public class RuleBasedTaskPlanner implements TaskPlanner {
         }
 
         int requestedCount = parseOrderCount(recognizedIntent.entities());
-        if (requestedCount != 2) {
+        if (requestedCount < 2 || requestedCount > MAX_STEPS) {
             return TaskPlanningResult.notDecomposed();
         }
         if (!containsLookupHint(question, recognizedIntent.entities())) {
@@ -154,27 +158,35 @@ public class RuleBasedTaskPlanner implements TaskPlanner {
                         "order_status", orderStatus
                 ),
                 false,
-                "请先查询最近的 " + requestedCount + " 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2\"}。"
+                "请先查询最近的 " + requestedCount + " 个符合条件的订单，只返回 JSON：{\"order_ids\":\"id1,id2,id3\"}。"
         ));
-        steps.add(new TaskStep(
-                2,
-                IntentType.CANCEL_ORDER,
-                Map.of("target_order_slot", "order_id_1"),
-                true,
-                "请取消第一个目标订单。"
-        ));
-        steps.add(new TaskStep(
-                3,
-                IntentType.CANCEL_ORDER,
-                Map.of("target_order_slot", "order_id_2"),
-                false,
-                "请取消第二个目标订单。"
-        ));
+        for (int i = 0; i < requestedCount; i++) {
+            steps.add(new TaskStep(
+                    i + 2,
+                    IntentType.CANCEL_ORDER,
+                    Map.of("target_order_slot", "order_id_" + (i + 1)),
+                    i == 0,
+                    "请取消第" + (i + 1) + "个目标订单。"
+            ));
+        }
 
         TaskPlan plan = new TaskPlan(UUID.randomUUID().toString(), steps);
         log.info("Lookup-driven cancel plan created for question={}, orderStatus={}, count={}",
                 question, orderStatus, requestedCount);
         return new TaskPlanningResult(true, plan);
+    }
+
+    private boolean isLookupDrivenCancelRequest(String question, IntentRecognitionResult recognizedIntent) {
+        if (recognizedIntent == null || recognizedIntent.intent() != IntentType.CANCEL_ORDER) {
+            return false;
+        }
+        if (!extractOrderIds(recognizedIntent.entities()).isEmpty()) {
+            return false;
+        }
+        if (!containsLookupHint(question, recognizedIntent.entities())) {
+            return false;
+        }
+        return StringUtils.hasText(orderStatusHint(recognizedIntent.entities(), question));
     }
 
     private String instructionFor(IntentType intentType, String orderReference) {

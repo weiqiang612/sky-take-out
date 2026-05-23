@@ -78,11 +78,11 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        String conversationId = safeText((String) session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY));
+        String conversationId = safeText((String) removeSessionAttribute(session, ACTIVE_CONVERSATION_ID_KEY));
         disposeActiveSubscription(conversationId);
-        session.getAttributes().remove(PENDING_QUESTION_KEY);
-        session.getAttributes().remove(PENDING_INTENT_KEY);
-        session.getAttributes().remove(PENDING_INTENT_RESULT_KEY);
+        removeSessionAttribute(session, PENDING_QUESTION_KEY);
+        removeSessionAttribute(session, PENDING_INTENT_KEY);
+        removeSessionAttribute(session, PENDING_INTENT_RESULT_KEY);
     }
 
     private void handleQuestion(WebSocketSession session, AgentChatRequest request) {
@@ -118,9 +118,9 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
         // 需要人确认
         if (preIntent.requiresHumanConfirmation()) {
-            session.getAttributes().put(PENDING_QUESTION_KEY, request.message());
-            session.getAttributes().put(PENDING_INTENT_KEY, preIntent.intent().value());
-            session.getAttributes().put(PENDING_INTENT_RESULT_KEY, preIntent);
+            setSessionAttribute(session, PENDING_QUESTION_KEY, request.message());
+            setSessionAttribute(session, PENDING_INTENT_KEY, preIntent.intent().value());
+            setSessionAttribute(session, PENDING_INTENT_RESULT_KEY, preIntent);
             sendConfirmation(session, agentChatService.confirmationFrame(preIntent));
             return;
         }
@@ -138,9 +138,9 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
                     planningResult.plan()
             );
             if (outcome.waitingForConfirmation()) {
-                session.getAttributes().put(PENDING_QUESTION_KEY, request.message());
-                session.getAttributes().put(PENDING_INTENT_KEY, PLAN_CONFIRM_INTENT);
-                session.getAttributes().put(PENDING_INTENT_RESULT_KEY, preIntent);
+                setSessionAttribute(session, PENDING_QUESTION_KEY, request.message());
+                setSessionAttribute(session, PENDING_INTENT_KEY, PLAN_CONFIRM_INTENT);
+                setSessionAttribute(session, PENDING_INTENT_RESULT_KEY, preIntent);
                 sendConfirmation(session, new AgentChatConfirmationFrame(
                         "confirmation",
                         PLAN_CONFIRM_INTENT,
@@ -150,7 +150,11 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
                 ));
                 return;
             }
-            sendPlanOutcome(session, outcome, preIntent);
+            if (outcome.completed()) {
+                sendPlanOutcome(session, outcome, preIntent);
+            } else {
+                sendError(session, StringUtils.hasText(outcome.finalAnswer()) ? outcome.finalAnswer() : "Plan execution failed");
+            }
             return;
         }
 
@@ -159,10 +163,10 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleConfirmation(WebSocketSession session, AgentChatRequest request) {
-        String pendingQuestion = safeText((String) session.getAttributes().get(PENDING_QUESTION_KEY));
-        String pendingIntent = safeText((String) session.getAttributes().get(PENDING_INTENT_KEY));
+        String pendingQuestion = safeText((String) getSessionAttribute(session, PENDING_QUESTION_KEY));
+        String pendingIntent = safeText((String) getSessionAttribute(session, PENDING_INTENT_KEY));
         IntentRecognitionResult pendingIntentResult =
-                (IntentRecognitionResult) session.getAttributes().get(PENDING_INTENT_RESULT_KEY);
+                (IntentRecognitionResult) getSessionAttribute(session, PENDING_INTENT_RESULT_KEY);
         String conversationId = safeText(request.conversationId());
         String userId = safeText(request.userId());
         if (!StringUtils.hasText(pendingQuestion) || !StringUtils.hasText(pendingIntent)
@@ -176,9 +180,9 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        session.getAttributes().remove(PENDING_QUESTION_KEY);
-        session.getAttributes().remove(PENDING_INTENT_KEY);
-        session.getAttributes().remove(PENDING_INTENT_RESULT_KEY);
+        removeSessionAttribute(session, PENDING_QUESTION_KEY);
+        removeSessionAttribute(session, PENDING_INTENT_KEY);
+        removeSessionAttribute(session, PENDING_INTENT_RESULT_KEY);
 
         // 确认分步任务的继续执行
         if (PLAN_CONFIRM_INTENT.equalsIgnoreCase(requestedIntent)) {
@@ -210,9 +214,9 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
                     planningResult.plan()
             );
             if (outcome.waitingForConfirmation()) {
-                session.getAttributes().put(PENDING_QUESTION_KEY, pendingQuestion);
-                session.getAttributes().put(PENDING_INTENT_KEY, PLAN_CONFIRM_INTENT);
-                session.getAttributes().put(PENDING_INTENT_RESULT_KEY, confirmedIntent);
+                setSessionAttribute(session, PENDING_QUESTION_KEY, pendingQuestion);
+                setSessionAttribute(session, PENDING_INTENT_KEY, PLAN_CONFIRM_INTENT);
+                setSessionAttribute(session, PENDING_INTENT_RESULT_KEY, confirmedIntent);
                 sendConfirmation(session, new AgentChatConfirmationFrame(
                         "confirmation",
                         PLAN_CONFIRM_INTENT,
@@ -222,7 +226,11 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
                 ));
                 return;
             }
-            sendPlanOutcome(session, outcome, confirmedIntent);
+            if (outcome.completed()) {
+                sendPlanOutcome(session, outcome, confirmedIntent);
+            } else {
+                sendError(session, StringUtils.hasText(outcome.finalAnswer()) ? outcome.finalAnswer() : "Plan execution failed");
+            }
             return;
         }
 
@@ -257,11 +265,11 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
                         () -> handleStreamComplete(session, conversationId, userId, finalIntent.get())
                 );
         if (subscription.isDisposed()) {
-            session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
+            removeSessionAttribute(session, ACTIVE_CONVERSATION_ID_KEY);
             return;
         }
         activeStreams.put(conversationId, subscription);
-        session.getAttributes().put(ACTIVE_CONVERSATION_ID_KEY, conversationId);
+        setSessionAttribute(session, ACTIVE_CONVERSATION_ID_KEY, conversationId);
     }
 
     private void handleStreamChunk(WebSocketSession session,
@@ -291,14 +299,14 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             sendDone(session, intentResult);
         } finally {
             disposeActiveSubscription(conversationId);
-            session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
+            removeSessionAttribute(session, ACTIVE_CONVERSATION_ID_KEY);
         }
     }
 
     private void handleStreamError(WebSocketSession session, String conversationId, Throwable ex) {
         sendError(session, errorMessage(ex));
         disposeActiveSubscription(conversationId);
-        session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
+        removeSessionAttribute(session, ACTIVE_CONVERSATION_ID_KEY);
         log.error("WebSocket chat stream failed", ex);
     }
 
@@ -309,9 +317,9 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         }
         disposeActiveSubscription(conversationId);
         taskOrchestratorService.abandon(conversationId);
-        String activeConversationId = safeText((String) session.getAttributes().get(ACTIVE_CONVERSATION_ID_KEY));
+        String activeConversationId = safeText((String) getSessionAttribute(session, ACTIVE_CONVERSATION_ID_KEY));
         if (conversationId.equals(activeConversationId)) {
-            session.getAttributes().remove(ACTIVE_CONVERSATION_ID_KEY);
+            removeSessionAttribute(session, ACTIVE_CONVERSATION_ID_KEY);
         }
         send(session, new AgentChatCancelledFrame("cancelled", conversationId));
     }
@@ -384,6 +392,24 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     private String safeText(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
+    }
+
+    private Object getSessionAttribute(WebSocketSession session, String key) {
+        synchronized (session) {
+            return session.getAttributes().get(key);
+        }
+    }
+
+    private void setSessionAttribute(WebSocketSession session, String key, Object value) {
+        synchronized (session) {
+            session.getAttributes().put(key, value);
+        }
+    }
+
+    private Object removeSessionAttribute(WebSocketSession session, String key) {
+        synchronized (session) {
+            return session.getAttributes().remove(key);
+        }
     }
 
     private String errorMessage(Throwable ex) {

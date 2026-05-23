@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
+import com.weiqiang.skyai.intent_recognition.model.IntentType;
 import com.weiqiang.skyai.task.model.TaskExecutionOutcome;
 import com.weiqiang.skyai.task.model.TaskExecutionState;
 import com.weiqiang.skyai.task.model.TaskPlan;
@@ -25,6 +26,11 @@ import java.util.Map;
 public class TaskOrchestratorService {
 
     private static final ObjectMapper ORDER_OUTPUT_MAPPER = new ObjectMapper();
+    private static final long MIN_PLAN_TIMEOUT_SECONDS = 45L;
+    private static final long MAX_PLAN_TIMEOUT_SECONDS = 180L;
+    private static final long BASE_PLAN_TIMEOUT_SECONDS = 30L;
+    private static final long STEP_TIMEOUT_SECONDS = 20L;
+    private static final long HIGH_RISK_STEP_TIMEOUT_SECONDS = 15L;
 
     private final TaskPlanner taskPlanner;
     private final TaskExecutionStateRepository stateRepository;
@@ -51,7 +57,7 @@ public class TaskOrchestratorService {
                                             IntentRecognitionResult preIntent,
                                             TaskPlan plan) {
         log.info("Starting plan execution conversationId={} userId={} question={} steps={}", conversationId, userId, question, plan.steps().size());
-        TaskExecutionState state = TaskExecutionState.start(conversationId, userId, question, plan);
+        TaskExecutionState state = startExecutionState(conversationId, userId, question, plan);
         stateRepository.save(state);
         // 直接执行，直到需要用户确认或者执行完成
         return continueExecution(state, false);
@@ -73,7 +79,11 @@ public class TaskOrchestratorService {
             log.warn("Invalid waitingConfirmationStep={} for conversationId={}", waitingStep, conversationId);
             return new TaskExecutionOutcome(false, false, "", null, null, List.of());
         }
-        return continueExecution(state, true);
+        TaskExecutionState normalized = ensureTiming(state);
+        if (normalized != state) {
+            stateRepository.save(normalized);
+        }
+        return continueExecution(normalized, true);
     }
 
     public void abandon(String conversationId) {
@@ -83,11 +93,20 @@ public class TaskOrchestratorService {
 
     private TaskExecutionOutcome continueExecution(TaskExecutionState state, boolean confirmationGranted) {
         List<String> summaries = new ArrayList<>();
-        TaskExecutionState current = state;
+        TaskExecutionState current = ensureTiming(state);
+        if (current != state) {
+            stateRepository.save(current);
+        }
         List<TaskStep> steps = current.plan().steps();
         int index = current.nextStepIndex();
         log.info("Continuing execution conversationId={} from stepIndex={} totalSteps={}", current.conversationId(), index, steps.size());
         while (index < steps.size()) {
+            String timeoutError = timeoutMessageIfExpired(current);
+            if (StringUtils.hasText(timeoutError)) {
+                log.warn("Plan timeout conversationId={} stepIndex={} deadlineAt={} now={}",
+                        current.conversationId(), index, current.deadlineAtMillis(), System.currentTimeMillis());
+                return failExecution(current, summaries, timeoutError);
+            }
             TaskStep step = steps.get(index);
 
             if (step.requiresConfirmation()) {
@@ -124,13 +143,24 @@ public class TaskOrchestratorService {
                     false,
                     null
             );
-            String answer = agentChatService.askStep(stepPrompt(step, current), current.conversationId(), current.userId(), stepIntent);
+            String answer;
+            try {
+                answer = agentChatService.askStep(stepPrompt(step, current), current.conversationId(), current.userId(), stepIntent);
+            } catch (Exception ex) {
+                log.warn("Step {} failed conversationId={} intent={}", step.stepNumber(), current.conversationId(), step.intent().value(), ex);
+                return failExecution(current, summaries, "步骤 " + step.stepNumber() + " 执行失败：" + safeMessage(ex));
+            }
             summaries.add(answer);
 
             Map<String, String> stepOutputs = new LinkedHashMap<>();
             if (StringUtils.hasText(answer)) {
                 stepOutputs.put("step_" + step.stepNumber() + "_answer", answer);
                 stepOutputs.putAll(extractOrderOutputs(answer));
+            }
+            String validationError = validateStepOutcome(step, current, stepOutputs);
+            if (StringUtils.hasText(validationError)) {
+                log.warn("Step {} validation failed conversationId={} reason={}", step.stepNumber(), current.conversationId(), validationError);
+                return failExecution(current.afterStep(index, stepOutputs), summaries, validationError);
             }
             // 更新状态，继续执行下一步
             current = current.afterStep(index, stepOutputs);
@@ -162,6 +192,10 @@ public class TaskOrchestratorService {
         }
         if (current.stepOutputs() != null) {
             mergedEntities.putAll(current.stepOutputs());
+        }
+        String resolvedOrderId = resolveTargetOrderId(step, current);
+        if (StringUtils.hasText(resolvedOrderId)) {
+            mergedEntities.put("order_id", resolvedOrderId);
         }
         log.debug("Merged entities for step {}: {}", step.stepNumber(), mergedEntities);
         return mergedEntities;
@@ -237,6 +271,145 @@ public class TaskOrchestratorService {
         return outputs;
     }
 
+    private String validateStepOutcome(TaskStep step, TaskExecutionState current, Map<String, String> stepOutputs) {
+        String targetOrderSlot = step.entities() == null ? null : step.entities().get("target_order_slot");
+        if (StringUtils.hasText(targetOrderSlot)) {
+            String resolvedOrderId = resolveTargetOrderId(step, current);
+            if (!StringUtils.hasText(resolvedOrderId)) {
+                return "无法解析步骤 " + step.stepNumber() + " 需要的订单ID：" + targetOrderSlot;
+            }
+        }
+
+        if (step.intent() == IntentType.ORDER_STATUS && isRecentOrderLookup(step)) {
+            int expectedCount = parseExpectedLookupCount(step);
+            List<String> resolvedOrderIds = orderedLookupOrderIds(stepOutputs);
+            if (expectedCount > 0 && resolvedOrderIds.size() < expectedCount) {
+                return "订单查询结果不足，期望 " + expectedCount + " 个订单ID，但只得到 " + resolvedOrderIds.size() + " 个";
+            }
+        }
+
+        return null;
+    }
+
+    private boolean isRecentOrderLookup(TaskStep step) {
+        return step.entities() != null && "recent_orders".equals(step.entities().get("query_mode"));
+    }
+
+    private int parseExpectedLookupCount(TaskStep step) {
+        if (step.entities() == null) {
+            return -1;
+        }
+        String orderCount = step.entities().get("order_count");
+        if (!StringUtils.hasText(orderCount)) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(orderCount.trim());
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+    }
+
+    private List<String> orderedLookupOrderIds(Map<String, String> stepOutputs) {
+        List<String> ordered = new ArrayList<>();
+        if (stepOutputs == null || stepOutputs.isEmpty()) {
+            return ordered;
+        }
+        String orderIds = stepOutputs.get("order_ids");
+        if (StringUtils.hasText(orderIds)) {
+            for (String part : orderIds.split("[,，;；\\s]+")) {
+                if (StringUtils.hasText(part)) {
+                    ordered.add(part.trim());
+                }
+            }
+        }
+        for (int i = 1; i <= 3; i++) {
+            String key = "order_id_" + i;
+            String value = stepOutputs.get(key);
+            if (StringUtils.hasText(value) && !ordered.contains(value.trim())) {
+                ordered.add(value.trim());
+            }
+        }
+        String orderId = stepOutputs.get("order_id");
+        if (StringUtils.hasText(orderId) && !ordered.contains(orderId.trim())) {
+            ordered.add(orderId.trim());
+        }
+        return ordered;
+    }
+
+    private String resolveTargetOrderId(TaskStep step, TaskExecutionState current) {
+        if (step == null || step.entities() == null || current == null || current.stepOutputs() == null) {
+            return null;
+        }
+        String targetOrderSlot = step.entities().get("target_order_slot");
+        if (!StringUtils.hasText(targetOrderSlot)) {
+            return null;
+        }
+        String orderId = current.stepOutputs().get(targetOrderSlot);
+        if (StringUtils.hasText(orderId)) {
+            return orderId.trim();
+        }
+        if ("order_id".equals(targetOrderSlot)) {
+            String primaryOrderId = current.stepOutputs().get("order_id");
+            if (StringUtils.hasText(primaryOrderId)) {
+                return primaryOrderId.trim();
+            }
+        }
+        return null;
+    }
+
+    private TaskExecutionOutcome failExecution(TaskExecutionState current, List<String> summaries, String message) {
+        stateRepository.deleteByConversationId(current.conversationId());
+        return new TaskExecutionOutcome(false, false, StringUtils.hasText(message) ? message : "任务执行失败", current, null, summaries);
+    }
+
+    private TaskExecutionState startExecutionState(String conversationId,
+                                                   String userId,
+                                                   String question,
+                                                   TaskPlan plan) {
+        long startedAtMillis = System.currentTimeMillis();
+        long deadlineAtMillis = startedAtMillis + buildPlanTimeoutMillis(plan);
+        return TaskExecutionState.start(conversationId, userId, question, plan, startedAtMillis, deadlineAtMillis);
+    }
+
+    private TaskExecutionState ensureTiming(TaskExecutionState state) {
+        if (state == null) {
+            return null;
+        }
+        if (state.startedAtMillis() != null && state.deadlineAtMillis() != null) {
+            return state;
+        }
+        long startedAtMillis = state.startedAtMillis() != null ? state.startedAtMillis() : System.currentTimeMillis();
+        long deadlineAtMillis = state.deadlineAtMillis() != null
+                ? state.deadlineAtMillis()
+                : startedAtMillis + buildPlanTimeoutMillis(state.plan());
+        return state.withTiming(startedAtMillis, deadlineAtMillis);
+    }
+
+    private long buildPlanTimeoutMillis(TaskPlan plan) {
+        if (plan == null || plan.steps() == null || plan.steps().isEmpty()) {
+            return MIN_PLAN_TIMEOUT_SECONDS * 1000L;
+        }
+        int stepCount = plan.steps().size();
+        long highRiskSteps = plan.steps().stream().filter(TaskStep::requiresConfirmation).count();
+        long budgetSeconds = BASE_PLAN_TIMEOUT_SECONDS
+                + STEP_TIMEOUT_SECONDS * stepCount
+                + HIGH_RISK_STEP_TIMEOUT_SECONDS * highRiskSteps;
+        long clampedSeconds = Math.max(MIN_PLAN_TIMEOUT_SECONDS, Math.min(MAX_PLAN_TIMEOUT_SECONDS, budgetSeconds));
+        return clampedSeconds * 1000L;
+    }
+
+    private String timeoutMessageIfExpired(TaskExecutionState state) {
+        if (state == null || state.deadlineAtMillis() == null) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        if (now <= state.deadlineAtMillis()) {
+            return null;
+        }
+        return "任务执行超时，请缩短步骤数量或拆分后再试。";
+    }
+
     private JsonNode readJson(String text) {
         if (!StringUtils.hasText(text)) {
             return null;
@@ -259,6 +432,13 @@ public class TaskOrchestratorService {
         if (StringUtils.hasText(orderId)) {
             orderIds.add(orderId.trim());
         }
+    }
+
+    private String safeMessage(Throwable ex) {
+        if (ex == null || !StringUtils.hasText(ex.getMessage())) {
+            return "未知错误";
+        }
+        return ex.getMessage();
     }
 
     private String answerPreview(String text) {
