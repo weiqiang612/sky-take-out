@@ -162,8 +162,8 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         return switch (intentType) {
             case SHOP_STATUS -> ProfileInjectionLevel.NONE;
             case ORDER_STATUS, TRACK_DELIVERY, CANCEL_ORDER, REQUEST_REFUND, CHANGE_ADDRESS, ADDRESS_MANAGEMENT,
-                 REPORT_MISSING_ITEM, REORDER, OTHER -> ProfileInjectionLevel.SUMMARY;
-            case MENU_QUERY, CART_MANAGEMENT, FAQ, ESCALATE_TO_HUMAN -> ProfileInjectionLevel.FULL;
+                 REPORT_MISSING_ITEM, REORDER -> ProfileInjectionLevel.SUMMARY;
+            case MENU_QUERY, CART_MANAGEMENT, FAQ, ESCALATE_TO_HUMAN, OTHER -> ProfileInjectionLevel.FULL;
         };
     }
 

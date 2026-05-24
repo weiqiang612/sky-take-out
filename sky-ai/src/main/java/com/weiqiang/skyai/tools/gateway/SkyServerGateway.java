@@ -126,7 +126,12 @@ public class SkyServerGateway implements OrderGateway, MenuGateway, CartGateway,
 
     @Override
     public String setDefaultAddress(String userId, Long addressId) {
-        return put(userId, "/ai/customer/addresses/default", Map.of("id", addressId));
+        String result = put(userId, "/ai/customer/addresses/default", Map.of("id", addressId));
+        if (result.startsWith("FAIL:")) {
+            return result;
+        }
+        String snapshot = getDefaultAddress(userId);
+        return snapshot.startsWith("FAIL:") ? result : snapshot;
     }
 
     @Override

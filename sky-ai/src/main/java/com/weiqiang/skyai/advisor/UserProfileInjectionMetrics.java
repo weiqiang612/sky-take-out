@@ -25,6 +25,7 @@ public class UserProfileInjectionMetrics {
         record("intent_recognition", intentType, level, profilePresent, charsInjected);
     }
 
+    // Helper method to record metrics with consistent tagging
     private void record(String stage, IntentType intentType, ProfileInjectionLevel level, boolean profilePresent, int charsInjected) {
         String intentTag = intentType == null ? "unknown" : intentType.value();
         String levelTag = level == null ? ProfileInjectionLevel.NONE.name() : level.name();

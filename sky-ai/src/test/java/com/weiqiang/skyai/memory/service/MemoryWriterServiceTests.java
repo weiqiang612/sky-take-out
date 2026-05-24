@@ -29,8 +29,23 @@ class MemoryWriterServiceTests {
         ReflectionTestUtils.invokeMethod(service, "persistToolOutcome", "u1", IntentType.REQUEST_REFUND, "Refund requested for order 99: late delivery");
         ReflectionTestUtils.invokeMethod(service, "persistToolOutcome", "u1", IntentType.CHANGE_ADDRESS, "Updated delivery address for order 99: No. 1 Road");
 
-        verify(userMemoryFactService).upsertFact(eq("u1"), eq(MemoryFactKey.OPERATIONAL_NOTES), eq("Refund issued for order 99: late delivery"), eq(MemoryFactSourceType.TOOL), isNull());
+        verify(userMemoryFactService).upsertFact(eq("u1"), eq(MemoryFactKey.OPERATIONAL_NOTES), eq("已为订单 99 退款：late delivery"), eq(MemoryFactSourceType.TOOL), isNull());
         verify(userMemoryFactService).upsertFact(eq("u1"), eq(MemoryFactKey.DEFAULT_ADDRESS), eq("No. 1 Road"), eq(MemoryFactSourceType.TOOL), isNull());
+    }
+
+    @Test
+    void persistToolOutcomeWritesDefaultAddressSnapshotForQuery() {
+        ChatClient.Builder chatClientBuilder = mock(ChatClient.Builder.class);
+        RedisChatMemoryRepository redisChatMemoryRepository = mock(RedisChatMemoryRepository.class);
+        UserMemoryFactService userMemoryFactService = mock(UserMemoryFactService.class);
+        MemoryWriterService service = new MemoryWriterService(chatClientBuilder, redisChatMemoryRepository, userMemoryFactService, new ObjectMapper());
+
+        String responseData = """
+                {"id":1,"userId":7,"consignee":"张三","phone":"13800000000","detail":"朝阳区建国路1号","label":"家","isDefault":1}
+                """;
+        ReflectionTestUtils.invokeMethod(service, "persistToolOutcome", "u1", IntentType.ADDRESS_MANAGEMENT, responseData);
+
+        verify(userMemoryFactService).upsertFact(eq("u1"), eq(MemoryFactKey.DEFAULT_ADDRESS), eq("朝阳区建国路1号"), eq(MemoryFactSourceType.TOOL), isNull());
     }
 
     @Test
@@ -53,5 +68,21 @@ class MemoryWriterServiceTests {
 
         org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("explicit statements only"));
         org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("User-managed facts may also be edited or deleted later from the UI"));
+        org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("historical facts"));
+        org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("不要写成请求句") || prompt.contains("request style"));
+        org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("曾经"));
+    }
+
+    @Test
+    void persistToolOutcomeWritesHistoricalStyleCancelNote() {
+        ChatClient.Builder chatClientBuilder = mock(ChatClient.Builder.class);
+        RedisChatMemoryRepository redisChatMemoryRepository = mock(RedisChatMemoryRepository.class);
+        UserMemoryFactService userMemoryFactService = mock(UserMemoryFactService.class);
+        MemoryWriterService service = new MemoryWriterService(chatClientBuilder, redisChatMemoryRepository, userMemoryFactService, new ObjectMapper());
+
+        String today = (String) ReflectionTestUtils.invokeMethod(service, "today");
+        ReflectionTestUtils.invokeMethod(service, "persistToolOutcome", "u1", IntentType.CANCEL_ORDER, "Order cancelled for order 88");
+
+        verify(userMemoryFactService).upsertFact(eq("u1"), eq(MemoryFactKey.OPERATIONAL_NOTES), eq("已取消订单 88（" + today + "）"), eq(MemoryFactSourceType.TOOL), isNull());
     }
 }

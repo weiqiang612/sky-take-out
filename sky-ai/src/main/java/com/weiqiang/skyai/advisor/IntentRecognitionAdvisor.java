@@ -92,6 +92,7 @@ public class IntentRecognitionAdvisor implements CallAdvisor, StreamAdvisor {
         if (result == null) {
             result = new IntentRecognitionResult(IntentType.OTHER, ConfidenceLevel.LOW, Map.of(), List.of(), null, false, null);
         }
+        // Record metrics for profile summary injection and intent recognition results
         userProfileInjectionMetrics.recordIntentRecognition(result.intent(), profileSummaryInjection.level(), profileSummaryInjection.injected(), profileSummaryInjection.charsInjected());
         log.debug("intent recognition profile summary intentType={} level={} injected={} charsInjected={}",
                 result.intent(), profileSummaryInjection.level(), profileSummaryInjection.injected(), profileSummaryInjection.charsInjected());
@@ -100,12 +101,14 @@ public class IntentRecognitionAdvisor implements CallAdvisor, StreamAdvisor {
 
     private ProfileSummaryInjection injectProfileSummary(String userId, String userText) {
         String safeUserText = userText == null ? "" : userText;
+        // 1. Check if profile summary injection is enabled
         if (!userProfileMemoryProperties.isEnabled() || !userProfileMemoryProperties.isIntentRecognitionSummaryEnabled()) {
             return new ProfileSummaryInjection(safeUserText, ProfileInjectionLevel.NONE, false, 0);
         }
         if (!StringUtils.hasText(userId)) {
             return new ProfileSummaryInjection(safeUserText, ProfileInjectionLevel.NONE, false, 0);
         }
+        // 2. Get user profile notes summary
         String summary = userMemoryFactService.userProfileNotesSummary(userId);
         if (!StringUtils.hasText(summary)) {
             return new ProfileSummaryInjection(safeUserText, ProfileInjectionLevel.NONE, false, 0);

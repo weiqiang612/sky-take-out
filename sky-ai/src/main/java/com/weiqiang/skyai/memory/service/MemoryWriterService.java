@@ -39,6 +39,11 @@ public class MemoryWriterService {
             Each fact field must be omitted when there is no new information, or include {"value": ..., "confidence": 0.0-1.0}.
             A fact entry value may be null to signal that the user wants the fact forgotten.
             Use these keys only: favorite_dishes, favorite_flavors, dietary_restrictions, default_address, operational_notes, corrections.
+            For operational_notes, capture only durable historical facts, recurring behaviors, or stable operational preferences that the user has demonstrated before.
+            Do not write current requests, transient tasks, or tool-like instructions into operational_notes.
+            不要写成请求句、任务句或执行句。
+            Write operational_notes in a historical fact style, not a request style.
+            Good examples: "用户曾经取消过订单 99", "用户过去经常查询订单状态", "用户有复购历史订单的习惯".
             
             Strict Response Requirement:
             Respond ONLY with the JSON object. Do not include any preface, markdown, or analysis.
@@ -118,18 +123,40 @@ public class MemoryWriterService {
         if (!StringUtils.hasText(responseData) || responseData.startsWith("FAIL:")) {
             return;
         }
+        if (intent == IntentType.ADDRESS_MANAGEMENT && persistDefaultAddressSnapshot(userId, responseData)) {
+            return;
+        }
         if (intent == IntentType.CANCEL_ORDER) {
-            persistOperationalNote(userId, "Cancelled order " + extractOrderId(responseData) + " on " + today());
+            persistOperationalNote(userId, "已取消订单 " + extractOrderId(responseData) + "（" + today() + "）");
             return;
         }
         if (intent == IntentType.REQUEST_REFUND) {
             String reason = extractTail(responseData);
-            persistOperationalNote(userId, "Refund issued for order " + extractOrderId(responseData)
-                    + (StringUtils.hasText(reason) ? ": " + reason : ""));
+            persistOperationalNote(userId, "已为订单 " + extractOrderId(responseData)
+                    + " 退款" + (StringUtils.hasText(reason) ? "：" + reason : ""));
             return;
         }
         if (intent == IntentType.CHANGE_ADDRESS) {
             userMemoryFactService.upsertFact(userId, MemoryFactKey.DEFAULT_ADDRESS, extractTail(responseData), MemoryFactSourceType.TOOL, null);
+        }
+    }
+
+    private boolean persistDefaultAddressSnapshot(String userId, String responseData) {
+        try {
+            JsonNode address = objectMapper.readTree(responseData);
+            if (!address.isObject()) {
+                return false;
+            }
+            String detail = address.path("detail").isMissingNode() || address.path("detail").isNull()
+                    ? null
+                    : address.path("detail").asText();
+            if (!StringUtils.hasText(detail)) {
+                return false;
+            }
+            userMemoryFactService.upsertFact(userId, MemoryFactKey.DEFAULT_ADDRESS, detail.trim(), MemoryFactSourceType.TOOL, null);
+            return true;
+        } catch (Exception ex) {
+            return false;
         }
     }
 
