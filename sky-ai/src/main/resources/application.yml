@@ -5,6 +5,10 @@ spring:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   flyway:
     baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
   ai:
     mcp:
       client:
