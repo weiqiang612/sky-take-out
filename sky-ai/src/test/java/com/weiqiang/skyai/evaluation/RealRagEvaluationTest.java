@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Slf4j
 @SpringBootTest
 @ActiveProfiles("dev")
-@Disabled("Requires active PostgreSQL/pgvector database and LLM API Key to run. Run manually in IDEA by clicking play.")
+//@Disabled("Requires active PostgreSQL/pgvector database and LLM API Key to run. Run manually in IDEA by clicking play.")
 class RealRagEvaluationTest {
 
     private static final Path REPORT_DIR = Path.of("target", "offline-replay");

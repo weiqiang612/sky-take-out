@@ -8,6 +8,7 @@ import com.weiqiang.skyai.rag.offline.model.RagDocumentSummary;
 import com.weiqiang.skyai.rag.offline.store.RagIndexRepository;
 import com.weiqiang.skyai.rag.offline.service.OfflineRagDocumentService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
+@Slf4j
 @RestController
 @RequestMapping("/rag/offline")
 @RequiredArgsConstructor
@@ -32,6 +34,7 @@ public class OfflineRagController {
     @PostMapping("/index")
     public OfflineIndexResponse index(@RequestParam("file") MultipartFile file,
                                       @RequestParam(value = "documentType", required = false) String documentType) {
+        log.info("Received index request for file: {}, documentType: {}", file.getOriginalFilename(), documentType);
         return offlineIndexService.index(file, documentType);
     }
 

@@ -40,21 +40,21 @@ spring:
 skyai:
   retrieval:
     online:
-      top-k: ${SKY_AI_RETRIEVAL_TOP_K:80}
-      top-n: ${SKY_AI_RETRIEVAL_TOP_N:8}
-      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.5}
+      top-k: ${SKY_AI_RETRIEVAL_TOP_K:15} # Embedding retrieval top-k results
+      top-n: ${SKY_AI_RETRIEVAL_TOP_N:2} # Reranking top-n results from embedding retrieval
+      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.55}
       fallback-to-embedding-results-on-rerank-failure: ${SKY_AI_RETRIEVAL_FALLBACK_ON_RERANK_FAILURE:true}
       query-expansion:
-        enabled: ${SKY_AI_QUERY_EXPANSION_ENABLED:true}
-        max-queries: ${SKY_AI_QUERY_EXPANSION_MAX_QUERIES:2}
+        enabled: ${SKY_AI_QUERY_EXPANSION_ENABLED:false}
+        max-queries: ${SKY_AI_QUERY_EXPANSION_MAX_QUERIES:1}
         fallback-on-failure: ${SKY_AI_QUERY_EXPANSION_FALLBACK_ON_FAILURE:true}
       keyword:
         enabled: ${SKY_AI_KEYWORD_RETRIEVAL_ENABLED:true}
-        top-k: ${SKY_AI_KEYWORD_RETRIEVAL_TOP_K:40}
+        top-k: ${SKY_AI_KEYWORD_RETRIEVAL_TOP_K:10}
       fusion:
-        max-candidates: ${SKY_AI_RETRIEVAL_FUSION_MAX_CANDIDATES:120}
+        max-candidates: ${SKY_AI_RETRIEVAL_FUSION_MAX_CANDIDATES:30}
         rrf-k: ${SKY_AI_RETRIEVAL_FUSION_RRF_K:60}
       siliconflow:
-        base-url: ${RERANKER_BASE_URL:https://openrouter.ai/api}
-        api-key: ${OPENAI_API_KEY:temp_key}
-        model: ${SILICONFLOW_RERANKER_MODEL:cohere/rerank-4-pro}
+        base-url: ${SILICONFLOW_BASE_URL:https://api.siliconflow.cn}
+        api-key: ${SILICONFLOW_API_KEY:}
+        model: ${SILICONFLOW_RERANKER_MODEL:BAAI/bge-reranker-v2-m3}
