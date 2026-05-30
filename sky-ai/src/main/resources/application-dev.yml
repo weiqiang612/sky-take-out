@@ -40,6 +40,9 @@ spring:
         distance-type: COSINE_DISTANCE
 
 skyai:
+  faq-cache:
+    enabled: true
+    similarity-threshold: 0.95
   rate-limit:
     requests-per-minute: 20
     window-seconds: 60

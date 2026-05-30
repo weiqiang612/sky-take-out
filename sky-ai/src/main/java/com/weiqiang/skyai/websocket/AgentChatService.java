@@ -10,6 +10,7 @@ import com.weiqiang.skyai.advisor.SafeToolCallAdvisor;
 import com.weiqiang.skyai.advisor.RagAdvisor;
 import com.weiqiang.skyai.advisor.ToolFilterAdvisor;
 import com.weiqiang.skyai.advisor.UserContextAdvisor;
+import com.weiqiang.skyai.advisor.FaqSemanticCacheAdvisor;
 import com.weiqiang.skyai.memory.service.ChatHistoryService;
 import com.weiqiang.skyai.memory.service.MemoryWriterService;
 import com.weiqiang.skyai.websocket.model.AgentChatConfirmationFrame;
@@ -47,6 +48,7 @@ public class AgentChatService {
     private final MemoryWriterService memoryWriterService;
     private final CustomerIntentRecognitionService customerIntentRecognitionService;
     private final ChatHistoryService chatHistoryService;
+    private final FaqSemanticCacheAdvisor faqSemanticCacheAdvisor;
 
     public AgentChatService(@Qualifier("toolChatClientBuilder") ChatClient.Builder chatClientBuilder,
                             IntentRecognitionAdvisor intentRecognitionAdvisor,
@@ -57,7 +59,8 @@ public class AgentChatService {
                             SafeToolCallAdvisor safeToolCallAdvisor,
                             MemoryWriterService memoryWriterService,
                             CustomerIntentRecognitionService customerIntentRecognitionService,
-                            ChatHistoryService chatHistoryService) {
+                            ChatHistoryService chatHistoryService,
+                            FaqSemanticCacheAdvisor faqSemanticCacheAdvisor) {
         this.chatClientBuilder = chatClientBuilder;
         this.intentRecognitionAdvisor = intentRecognitionAdvisor;
         this.userContextAdvisor = userContextAdvisor;
@@ -68,6 +71,7 @@ public class AgentChatService {
         this.memoryWriterService = memoryWriterService;
         this.customerIntentRecognitionService = customerIntentRecognitionService;
         this.chatHistoryService = chatHistoryService;
+        this.faqSemanticCacheAdvisor = faqSemanticCacheAdvisor;
     }
 
     public IntentRecognitionResult recognizeIntent(String question, String conversationId, String userId) {
@@ -103,6 +107,7 @@ public class AgentChatService {
     public List<CallAdvisor> advisors(IntentRecognitionResult preIntent) {
         List<CallAdvisor> advisors = new ArrayList<>();
         advisors.add(intentRecognitionAdvisor);
+        advisors.add(faqSemanticCacheAdvisor);
         advisors.add(userContextAdvisor);
         advisors.add(messageChatMemoryAdvisor);
         if (shouldUseRag(preIntent)) {

@@ -9,6 +9,7 @@ import com.weiqiang.skyai.advisor.RagAdvisor;
 import com.weiqiang.skyai.advisor.SafeToolCallAdvisor;
 import com.weiqiang.skyai.advisor.ToolFilterAdvisor;
 import com.weiqiang.skyai.advisor.UserContextAdvisor;
+import com.weiqiang.skyai.advisor.FaqSemanticCacheAdvisor;
 import com.weiqiang.skyai.memory.service.ChatHistoryService;
 import com.weiqiang.skyai.memory.service.MemoryWriterService;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,8 @@ class AgentChatServiceTests {
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
                 mock(CustomerIntentRecognitionService.class),
-                mock(ChatHistoryService.class)
+                mock(ChatHistoryService.class),
+                mock(FaqSemanticCacheAdvisor.class)
         );
 
         IntentRecognitionResult mockPendingResult = new IntentRecognitionResult(
@@ -88,7 +90,8 @@ class AgentChatServiceTests {
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
                 mock(CustomerIntentRecognitionService.class),
-                mock(ChatHistoryService.class)
+                mock(ChatHistoryService.class),
+                mock(FaqSemanticCacheAdvisor.class)
         );
 
         IntentRecognitionResult result = new IntentRecognitionResult(
@@ -119,7 +122,8 @@ class AgentChatServiceTests {
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
                 mock(CustomerIntentRecognitionService.class),
-                mock(ChatHistoryService.class)
+                mock(ChatHistoryService.class),
+                mock(FaqSemanticCacheAdvisor.class)
         );
 
         IntentRecognitionResult result = new IntentRecognitionResult(
@@ -149,7 +153,8 @@ class AgentChatServiceTests {
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
                 mock(CustomerIntentRecognitionService.class),
-                mock(ChatHistoryService.class)
+                mock(ChatHistoryService.class),
+                mock(FaqSemanticCacheAdvisor.class)
         );
 
         assertThrows(IllegalArgumentException.class, () -> service.confirmedIntent("not-a-real-intent", null));
@@ -180,7 +185,8 @@ class AgentChatServiceTests {
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
                 mock(CustomerIntentRecognitionService.class),
-                mock(ChatHistoryService.class)
+                mock(ChatHistoryService.class),
+                mock(FaqSemanticCacheAdvisor.class)
         );
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
@@ -203,7 +209,8 @@ class AgentChatServiceTests {
                 mock(SafeToolCallAdvisor.class),
                 mock(MemoryWriterService.class),
                 mock(CustomerIntentRecognitionService.class),
-                mock(ChatHistoryService.class)
+                mock(ChatHistoryService.class),
+                mock(FaqSemanticCacheAdvisor.class)
         );
 
         IntentRecognitionResult faq = new IntentRecognitionResult(
@@ -218,11 +225,11 @@ class AgentChatServiceTests {
 
         List<CallAdvisor> advisors = service.advisors(faq);
 
-        assertEquals(6, advisors.size());
-        assertInstanceOf(RagAdvisor.class, advisors.get(3));
-        assertEquals(ragAdvisor, advisors.get(3));
+        assertEquals(7, advisors.size());
+        assertInstanceOf(RagAdvisor.class, advisors.get(4));
+        assertEquals(ragAdvisor, advisors.get(4));
         assertFalse(advisors.stream().anyMatch(advisor -> advisor instanceof org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor));
-        assertNotNull(advisors.get(4));
+        assertNotNull(advisors.get(5));
     }
 
     private Scheduler immediateScheduler() {
