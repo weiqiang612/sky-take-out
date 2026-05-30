@@ -16,6 +16,7 @@ import com.weiqiang.skyai.websocket.model.AgentChatRequest;
 import com.weiqiang.skyai.websocket.model.AgentChatStepDoneFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatStepStartFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatTokenFrame;
+import com.weiqiang.skyai.config.RateLimitManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.lang.Nullable;
@@ -45,14 +46,17 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
     private final AgentChatService agentChatService;
     private final TaskOrchestratorService taskOrchestratorService;
     private final ObjectMapper objectMapper;
+    private final RateLimitManager rateLimitManager;
     private final ConcurrentHashMap<String, Disposable> activeStreams = new ConcurrentHashMap<>();
 
     public AgentChatWebSocketHandler(AgentChatService agentChatService,
                                      TaskOrchestratorService taskOrchestratorService,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     RateLimitManager rateLimitManager) {
         this.agentChatService = agentChatService;
         this.taskOrchestratorService = taskOrchestratorService;
         this.objectMapper = objectMapper;
+        this.rateLimitManager = rateLimitManager;
     }
 
     @Override
@@ -65,6 +69,19 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
             AgentChatRequest request = objectMapper.treeToValue(frame, AgentChatRequest.class);
+
+            // 滑动窗口限流控制拦截
+            String userId = safeText(request.userId());
+            if (!StringUtils.hasText(userId)) {
+                userId = "anonymous";
+            }
+            if (!rateLimitManager.tryAcquire(userId)) {
+                long retryAfter = rateLimitManager.getRetryAfterSeconds(userId);
+                log.warn("WebSocket message rate limited for user: {}. Wait {} seconds.", userId, retryAfter);
+                send(session, new AgentChatErrorFrame("error", "请求过于频繁，请稍后再试", retryAfter));
+                return;
+            }
+
             if (request.isConfirmation()) {
                 handleConfirmation(session, request);
                 return;

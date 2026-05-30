@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import com.weiqiang.skyai.annotation.RateLimit;
 
 import java.util.Map;
 
@@ -26,6 +27,7 @@ public class ChatController {
         this.taskOrchestratorService = taskOrchestratorService;
     }
 
+    @RateLimit
     @GetMapping("/ask")
     public Map<String, String> ask(@RequestParam("question") String question,
                                    @RequestParam(value = "conversationId", defaultValue = ChatMemory.DEFAULT_CONVERSATION_ID) String conversationId,

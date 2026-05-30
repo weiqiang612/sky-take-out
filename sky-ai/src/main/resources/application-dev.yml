@@ -40,6 +40,9 @@ spring:
         distance-type: COSINE_DISTANCE
 
 skyai:
+  rate-limit:
+    requests-per-minute: 20
+    window-seconds: 60
   retrieval:
     online:
       top-k: ${SKY_AI_RETRIEVAL_TOP_K:15} # Embedding retrieval top-k results

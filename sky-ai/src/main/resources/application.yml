@@ -23,6 +23,9 @@ spring:
 server:
   port: ${SERVER_PORT:8081}
 skyai:
+  rate-limit:
+    requests-per-minute: ${SKY_AI_RATE_LIMIT_REQUESTS:20}
+    window-seconds: ${SKY_AI_RATE_LIMIT_WINDOW:60}
   sky-server:
     base-url: ${SKY_SERVER_BASE_URL:http://localhost:8080}
   memory:

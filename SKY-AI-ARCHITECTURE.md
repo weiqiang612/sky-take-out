@@ -1,693 +1,278 @@
-# Sky-AI 客服Agent运作流程详解
+# Sky-AI 智能客服 Agent 架构详解与运作流程
+
+Sky-AI 是一个基于 **Spring AI (v3.4.13)** 驱动的先进智能客服 Agent 系统。其核心架构围绕 **Advisor 链（顾问链）** 深度展开，融合了长连接双向实时通信、基于规则的高级任务规划与分解编排、以及强一致性的混合记忆持久化系统。通过精密的卡点控制和安全防线设计，系统实现了从“多意图语义分析”到“跨步骤级联调用和人工干预确认”的工业级闭环运作。
+
+---
 
 ## 1. 整体架构概览
 
-Sky-AI是一个Spring AI驱动的智能客服Agent系统，采用**Advisor链**（顾问链）的架构，层层递进地完成"意图识别→上下文注入→工具过滤→LLM调用"的完整流程。
+Sky-AI 采用分层拓扑与事件/长连接双向流式驱动，整体架构如下图所示：
 
 ```
-用户请求
-   ↓
-ChatController (/ai/ask)
-   ↓
-[Advisor Chain]
-   ├─ IntentRecognitionAdvisor      (优先级最高: HIGHEST_PRECEDENCE)
-   ├─ UserContextAdvisor            (优先级: HIGHEST_PRECEDENCE + 1)
-   ├─ MessageChatMemoryAdvisor      (Spring AI内置)
-   ├─ QuestionAnswerAdvisor         (RAG模块)
-   ├─ ToolFilterAdvisor             (优先级: HIGHEST_PRECEDENCE + 4)
-   └─ ChatClient                    (LLM调用)
-   ↓
-MemoryWriterService (异步持久化)
-   ↓
-最终回复
-```
-
----
-
-## 2. 核心流程详解
-
-### 2.1 入口点：ChatController
-
-```java
-@RestController
-@RequestMapping("/ai")
-public class ChatController {
-    @GetMapping("/ask")
-    public Map<String, String> ask(
-        @RequestParam("question") String question,
-        @RequestParam(value = "conversationId", defaultValue = DEFAULT) String conversationId,
-        @RequestParam(value = "userId", defaultValue = "anonymous") String userId
-    )
-}
-```
-
-**关键点：**
-- 接收用户问题、会话ID、用户ID
-- 首先调用`agentChatService.recognizeIntent()`进行**预识别**
-- 根据识别结果决定后续流程
-
----
-
-### 2.2 Advisor Chain工作流
-
-#### 2.2.1 IntentRecognitionAdvisor（意图识别）
-
-**职责：** 识别用户问题的意图类型
-
-**工作流程：**
-1. 优先检查Controller是否已预识别（`preRecognizedIntent`）
-   - 如果有，直接用预识别结果，避免重复调用
-2. 如果没有，调用`CustomerIntentRecognitionClient.recognize()`
-   - 收集最近4条聊天记录（从Redis）
-   - 收集用户的已知问题摘要（从PostgreSQL）
-   - 将这些上下文传给LLM进行意图分类
-
-3. 构造`IntentRecognitionResult`，放入`advisorContext`的`"intentResult"`键
-
-**识别的意图类型：**
-```java
-enum IntentType {
-    ORDER_STATUS,           // 查询订单状态
-    CANCEL_ORDER,           // 取消订单
-    REQUEST_REFUND,         // 申请退款
-    TRACK_DELIVERY,         // 追踪配送
-    REPORT_MISSING_ITEM,    // 报告遗漏
-    CHANGE_ADDRESS,         // 修改地址
-    MENU_QUERY,             // 菜单查询
-    CART_MANAGEMENT,        // 购物车管理
-    ADDRESS_MANAGEMENT,     // 地址管理
-    SHOP_STATUS,            // 店铺状态
-    FAQ,                    // 常见问题（触发RAG）
-    ESCALATE_TO_HUMAN,      // 人工转接
-    OTHER                   // 其他
-}
-```
-
-**信心度分级：**
-```java
-enum ConfidenceLevel {
-    HIGH,    // 高置信度 → 注入完整上下文
-    MEDIUM,  // 中置信度 → 注入部分上下文
-    LOW      // 低置信度 → 不注入上下文，仅返回澄清问题
-}
+                    ┌──────────────────────────────────────┐
+                    │        客户端 (Web / WebSocket)      │
+                    └───────┬──────────────────────▲───────┘
+                            │ (Request / Text Frame)│ (Delta Token / Control Frame)
+                            ▼                       │
+               ┌────────────────────────┐           │
+               │   WebSocket 实时入口   │           │
+               │ (AgentChatWebSocket)   │           │
+               └────────────┬───────────┘           │
+                            │ 1. 意图预识别         │
+                            ▼                       │
+               ┌────────────────────────┐           │
+               │  任务编排与规划中心    │           │
+               │(TaskOrchestratorService)           │
+               └────────────┬───────────┘           │
+                            │ 2. 任务流分解计划     │
+                            ▼                       │
+               ┌────────────────────────┐           │
+               │     顾问链装配驱动     │           │
+               │   (AgentChatService)   │           │
+               └────────────┬───────────┘           │
+                            │                       │
+ ┌──────────────────────────┼───────────────────────┼─────────────────────────┐
+ │ Advisor Chain (顾问链)   ▼                       │                         │
+ │                                                  │                         │
+ │  ├─ 1. IntentRecognitionAdvisor  (HIGHEST_PRECEDENCE)                      │
+ │  │     └─ 意图二度识别；根据配置动态将 User Profile Summary 注入输入以辅助语义理解│
+ │  │                                                                         │
+ │  ├─ 2. UserContextAdvisor       (HIGHEST_PRECEDENCE + 1)                  │
+ │  │     └─ 根据识别意图自适应评估画像注入级别 (NONE/SUMMARY/FULL) 并计算两级 allowedTools  │
+ │  │                                                                         │
+ │  ├─ 3. MessageChatMemoryAdvisor (Spring AI 内置)                           │
+ │  │     └─ 基于会话 ID 从 RedisChatMemoryRepository 加载最近历史消息上下文              │
+ │  │                                                                         │
+ │  ├─ 4. RagAdvisor               (条件挂载：HIGHEST_PRECEDENCE + 3)         │
+ │  │     └─ 针对特定知识库及纠纷高风险意图 (shouldUseRag)，注入向量检索关联文本             │
+ │  │                                                                         │
+ │  ├─ 5. ToolFilterAdvisor         (HIGHEST_PRECEDENCE + 4)                  │
+ │  │     └─ 基于前面算出的 allowedTools，对当前回合 LLM 可见工具进行硬性筛选与回调绑定      │
+ │  │                                                                         │
+ │  └─ 6. SafeToolCallAdvisor       (安全防线：LOWEST_PRECEDENCE - 100)       │
+ │        └─ 跟踪工具参数签名，拦截无限死循环；超过 4 轮或有重复签名则执行 fallback 截断      │
+ └──────────────────────────┬─────────────────────────────────────────────────┘
+                            │ 3. 执行工具 / 最终调用
+                            ▼
+               ┌────────────────────────┐
+               │    LLM (ChatClient)    │
+               └────────────┬───────────┘
+                            │ 4. 异步持久化触发
+                            ▼
+               ┌────────────────────────┐
+               │  异步记忆写入服务      │
+               │ (MemoryWriterService)  │
+               └────────────┬───────────┘
+                            │ (异步多线程 @Async)
+                            ├─► [Redis] (会话上下文，TTL 2h)
+                            └─► [PostgreSQL] (长期用户事实 user_memory_facts)
 ```
 
 ---
 
-#### 2.2.2 UserContextAdvisor（用户上下文注入）
+## 2. 顾问链（Advisor Chain）内部运作细节与安全防线
 
-**职责：** 根据意图和用户记忆，注入相关上下文到系统提示中
-
-**工作流程：**
-
-1. **读取意图识别结果**
-   ```java
-   IntentRecognitionResult intentResult = 
-       chatClientRequest.context().get("intentResult");
+### 2.1 意图识别与 Profile 辅助理解 (IntentRecognitionAdvisor)
+在首步执行中，`IntentRecognitionAdvisor` 的 `getOrder()` 为 `Ordered.HIGHEST_PRECEDENCE`。其工作流程为：
+1. **预识别旁路**：优先检测上下文参数 `preRecognizedIntent`，如有值则直接使用并存入 `advisorContext` 的 `"intentResult"` 中，免于二次识别，以达到性能最优化。
+2. **Profile 增强上下文**：当开启 `userProfileMemoryProperties.isIntentRecognitionSummaryEnabled()` 时，将调用 `UserMemoryFactService` 异步提取用户最新的 **Profile Summary（用户画像摘要）**。如果是已知老用户，系统会在传入意图识别客户端前，在用户当前输入的最前端拼接其画像备注摘要：
    ```
+   User profile notes: [画像摘要]
+   [用户当前提问文本]
+   ```
+   这一设计允许 LLM 即使在极简的一句话指令下（如“取消上次的操作”），也能准确识别出与画像事实强烈相关的意图。
+3. **输入装配与调用**：将带有增强文本的请求与通过 `ChatHistoryService` 获取的 Redis 历史对话（最近 4 条）传入意图识别客户端，分类得到最终意图。
 
-2. **计算允许的工具集合**
-   - 根据`IntentType`映射到对应的工具列表
-   - 例如：`CANCEL_ORDER` → {searchOrders, cancelOrder}
-   - 放入`advisorContext`的`"allowedTools"`键
-   - 供后续`ToolFilterAdvisor`使用
+### 2.2 多维意图建模与两级工具计算模型 (UserContextAdvisor)
+`UserContextAdvisor` 负责对意图进行解构，该类的 `getOrder()` 为 `Ordered.HIGHEST_PRECEDENCE + 1`。
 
-3. **构建上下文块（Context Block）**
-   - 根据意图类型，从数据库查询相关记忆信息
-   - 限制长度≤5句话，保证LLM上下文不爆炸
+#### 2.2.1 意图重写参数
+当上下文存在 override 参数 `currentStepIntent` 时，顾问会自动将当前意图强设为 `HIGH` 置信度并复用原 `entities` 实体，同时设置 `skipProfileInjection = true`（跳过画像注入，以防止复杂分步任务中上下文冗余）。
 
-**意图→记忆字段的映射表：**
+#### 2.2.2 多维意图属性
+意图模型 `IntentType` 在代码中进行了高维属性定义：
+- **`highRisk`**：标志该操作是否属于高风险操作（如取消订单、申请退款、修改地址）。
+- **`category`**：定义其语义类型，包括 `TASK`（任务型）、`KNOWLEDGE`（知识库型）以及 `CONVERSATIONAL`（闲聊或人工转接型）。
+- **`domain`**：定义任务的业务范畴，包括 `ORDER`（订单域）、`MENU`（菜单域）、`ADDRESS`（地址域）、`SHOP`（店铺域）。
 
-| 意图 | 关键记忆字段 | 示例上下文 |
-|------|------------|---------|
-| ORDER_STATUS | 最近订单ID | Order id: 1234567 |
-| CANCEL_ORDER | 操作记录(OPERATIONAL_NOTES) | Known issues: 上次订单已成功取消 |
-| REQUEST_REFUND | 操作记录 | Known issues: 该用户有退款历史 |
-| CHANGE_ADDRESS | 默认地址 | Default address: 朝阳区建国路1号 |
-| MENU_QUERY | 偏好菜品、偏好口味、饮食限制 | Favorite dishes: 鱼香肉丝; Dietary restrictions: 无辣 |
-| CART_MANAGEMENT | 偏好菜品、偏好口味、饮食限制 | Favorite flavors: 清淡 |
-| ADDRESS_MANAGEMENT | 默认地址 | Default address: ... |
-| FAQ | 偏好菜品等 | (从RAG检索) |
-| OTHER | 默认地址 | (如果信心度MEDIUM或HIGH) |
+#### 2.2.3 用户画像注入等级控制 (Profile Injection Level)
+为了在长会话中兼顾 LLM 的推理深度与 Token 消耗，顾问引入了细粒度的动态注入控制机制：
+- **`NONE`**：完全不注入画像事实。适用于 `SHOP_STATUS` 意图。
+- **`SUMMARY`**：仅注入用户画像摘要。适用于 `ORDER_STATUS`, `TRACK_DELIVERY`, `CANCEL_ORDER`, `REQUEST_REFUND`, `CHANGE_ADDRESS`, `ADDRESS_MANAGEMENT`, `REPORT_MISSING_ITEM`, `REORDER`。
+- **`FULL`**：注入高保真的详细画像。适用于 `MENU_QUERY`, `CART_MANAGEMENT`, `FAQ`, `ESCALATE_TO_HUMAN`, `OTHER` 等语义依赖较重、信息多变的回合。
 
-**示例上下文注入：**
-```
-Relevant memory:
-- Favorite dishes: 鱼香肉丝, 回锅肉 [用户自设]
-- Dietary restrictions: 无辣
-- Default address: 朝阳区建国路1号
+#### 2.2.4 两级工具计算与授权模型
+当且仅当识别意图为 `isTask() == true` 时，系统才会通过两级计算，动态对 LLM 限制并授权可用的工具集，生成 `"allowedTools"` 塞入 `advisorContext`。
+- **第一级：Domain 基础工具集（按业务域归类赋权）**
+  - `ORDER` 域 ─► `searchOrders`, `getOrderDetail`, `listRecentOrders`
+  - `MENU` 域 ─► `searchDishes`, `searchSetmeals`
+  - `ADDRESS` 域 ─► `searchAddresses`, `listAddresses`
+  - `SHOP` 域 ─► `getShopStatus`
+- **第二级：Intent 专属工具集（按意图针对性叠加追加）**
+  - `ORDER_STATUS` / `TRACK_DELIVERY` ─► 追加 `remindOrder`（催单）
+  - `CANCEL_ORDER` ─► 追加 `cancelOrder`
+  - `REQUEST_REFUND` / `REPORT_MISSING_ITEM` ─► 追加 `requestRefund`
+  - `REORDER` ─► 追加 `addDishToCart`, `addSetmealToCart`, `reorder`
+  - `CHANGE_ADDRESS` ─► 追加 `updateDeliveryAddress`
+  - `MENU_QUERY` ─► 追加 `listCategories`, `listDishesByCategory`, `listSetmealsByCategory`, `listSetmealDishes`, `getShopStatus`
+  - `CART_MANAGEMENT` ─► 追加 `searchCartItems`, `listCart`, `addDishToCart`, `addSetmealToCart`, `removeCartItem`, `cleanCart`
+  - `ADDRESS_MANAGEMENT` ─► 追加 `getDefaultAddress`, `setDefaultAddress`, `updateAddress`
 
-If the user names a dish, search the menu first and then act on the unique match directly.
-```
+### 2.3 条件式 RAG 挂载保护 (RagAdvisor)
+`RagAdvisor` 的 `getOrder()` 为 `Ordered.HIGHEST_PRECEDENCE + 3`。为防止通用的闲聊或简单工具调用回合遭受大量的无用文档片段轰炸，顾问在此实现了**条件式挂载**机制：
+- 只有满足 `shouldUseRag` 判定（即意图分类为 `isKnowledge()` [如 `FAQ`]，或属于涉及业务流与政策纠纷的高风险意图 `CANCEL_ORDER`、`REQUEST_REFUND`、`REPORT_MISSING_ITEM`）时，才会挂载向量检索服务。
+- 检索到结果后，将 `"使用以下检索上下文回答问题：\n"` 前缀与上下文拼接为 `SystemMessage` 优先 prepend 到指示序列中。
 
----
-
-#### 2.2.3 MessageChatMemoryAdvisor（会话记忆）
-
-**职责：** 管理会话级别的消息历史
-
-- Spring AI内置组件
-- 从Redis读取/写入会话消息
-- TTL: 2小时（自动刷新）
-- 使用`conversationId`作为键
-
----
-
-#### 2.2.4 QuestionAnswerAdvisor（RAG模块）
-
-**职责：** 处理FAQ类意图
-
-- 使用向量数据库检索相关文档
-- 实现RAG（Retrieval-Augmented Generation）
-- 当`IntentType == FAQ`时触发
-
-**配置项：**
-```yaml
-skyai:
-  retrieval:
-    online:
-      top-k: 80           # 从向量库取多少条
-      top-n: 8            # 重排后返回多少条
-      similarity-threshold: 0.0
-      query-expansion:
-        enabled: true     # 启用查询扩展
-        max-queries: 2
-      keyword:
-        enabled: true     # 启用关键词检索
-        top-k: 40
-      fusion:
-        max-candidates: 120  # 混合排序
-```
+### 2.4 防工具调用死循环安全顾问 (SafeToolCallAdvisor)
+由于大语言模型在解决多阶段复杂任务或面对模糊信息时，容易陷入反复执行相同工具的逻辑死循环中，系统特在顾问链的尾部（`LOWEST_PRECEDENCE - 100` 级别）部署了 `SafeToolCallAdvisor`，构建了最终的工业级安全防线：
+- **工具调用签名跟踪**：跟踪当前回合中所有被调用的工具，以其名称和参数进行组合，构造工具签名：`Signature = toolCall.name() + "\u0000" + toolCall.arguments()`。
+- **循环判定卡点**：如果出现以下任一判定：
+  1. 当前回合新调用的工具签名与之前已被执行的工具签名**完全一致**（检测到重复输入调用循环）；
+  2. 当前单回合的工具链式流转总轮数 `toolCallRounds` 达到上限门槛 `MAX_TOOL_CALL_ROUNDS`（默认设为 **4 轮**）；
+- **强制阻断Fallback**：拦截该工具调用，重写 LLM 输出为安全兜底话术，并直接截断返回：
+  > “已查询到的信息不足以继续自动处理，请你确认一下需要的菜品或改用更明确的说法。”
 
 ---
 
-#### 2.2.5 ToolFilterAdvisor（工具过滤）
+## 3. WebSocket 长连接交互协议与状态帧体系
 
-**职责：** 根据允许的工具集合，过滤并注册可用工具
+系统核心通过 `AgentChatWebSocketHandler` 维护了轻量级、低延迟的 Web 客服通信链路。协议采用基于 JSON 承载的双向事件驱动架构，定义了如下核心**交互控制帧（Control Frames）**：
 
-**工作流程：**
-1. 从`advisorContext`读取`"allowedTools"`（由UserContextAdvisor设置）
-2. 调用`DynamicToolCallbackRegistry.selectCallbacks(allowedTools)`
-3. 只注册允许的工具到LLM
-
-**可用工具列表（OrderTools + CartTools + MenuTools + AddressTools）：**
-
-| 工具类 | 工具方法 | 说明 |
-|------|--------|------|
-| OrderTools | searchOrders | 按关键词搜索订单 |
-| | getOrderDetail | 获取订单详情 |
-| | listRecentOrders | 列出最近订单 |
-| | cancelOrder | 取消订单 |
-| | requestRefund | 申请退款 |
-| | updateDeliveryAddress | 修改配送地址 |
-| | remindOrder | 催单 |
-| CartTools | searchDishes | 搜索菜品 |
-| | searchSetmeals | 搜索套餐 |
-| | listCart | 查看购物车 |
-| | addDishToCart | 加菜到购物车 |
-| | removeCartItem | 从购物车移除 |
-| | cleanCart | 清空购物车 |
-| MenuTools | listCategories | 菜品分类列表 |
-| | listDishesByCategory | 按分类查菜品 |
-| | getShopStatus | 获取店铺营业状态 |
-| AddressTools | searchAddresses | 搜索地址簿 |
-| | listAddresses | 列表地址 |
-| | setDefaultAddress | 设默认地址 |
-| | updateAddress | 修改地址 |
+| 控制帧类型 (`type`) | 数据载荷参数 | 说明 |
+| :--- | :--- | :--- |
+| **`token`** | `content` (增量字符) | LLM 生成的流式增量 Token 推送，利用 AtomicReference 进行首尾剪切式 Delta 计算输出。 |
+| **`confirmation`** | `intent`, `orderId`, `question`, `reason` | **人工确认交互帧**。用于截断执行流并让前端弹出强交互的确认弹窗。 |
+| **`step_start`** | `stepNumber`, `intent` | 复杂任务开启分步执行的事件通知。 |
+| **`step_done`** | `stepNumber`, `summary` | 复杂任务中单步完成事件，载荷内携带当前步骤的完成总结。 |
+| **`plan_complete`** | `finalAnswer`, `totalSteps` | 复杂任务规划执行全部结束的汇总报告帧。 |
+| **`done`** | `intent` | 当前单回合对话完全结束。 |
+| **`error`** | `message` | 发生非预期异常。在超时场景下，自动匹配底层 `TimeoutException`，输出友好兜底：“本次回复超时了，请稍后重试，或换一种说法再试一次。” |
+| **`cancelled`** | `conversationId` | 客户端发起中止，服务端调用 Disposable 及时注销当前流式 Subscription 并关闭当前的任务编排执行器。 |
 
 ---
 
-### 2.3 工具调用（Tool Calling）
+## 4. 任务规划器与多步骤编排 (RuleBasedTaskPlanner)
 
-#### 2.3.1 工具网关（Gateway）
-
-所有工具最终通过`OrderGateway`/`CartGateway`等调用sky-server暴露的`/ai/customer/**`接口
+客服系统的核心亮点之一是能够解决用户在一句话中布置的复杂多项业务。系统依靠 `TaskOrchestratorService` 协调，并通过 `RuleBasedTaskPlanner` 自动匹配并分解生成任务计划 `TaskPlan`（包含多个 `TaskStep`）。
 
 ```
-OrderTools
-    ↓
-OrderGateway (HTTP客户端)
-    ↓
-Sky-Server: /ai/customer/orders/{id}
-    ↓
-返回JSON结果
+        ┌────────────────────────────────────────────────────────┐
+        │                 用户复杂语义输入                       │
+        │ ("帮我退款订单123，并查一下最近的没送到的2个订单取消掉")│
+        └──────────────────────────┬─────────────────────────────┘
+                                   ▼
+                   ┌──────────────────────────────┐
+                   │    RuleBasedTaskPlanner      │
+                   └───────────────┬──────────────┘
+                                   │ 识别并应用如下三大分解模式
+                                   ▼
+     ┌─────────────────────────────┼─────────────────────────────┐
+     ▼                             ▼                             ▼
+【 模式一：复合意图任务分解 】    【 模式二：多订单批量取消 】  【 模式三：检索驱动取消规划 】
+ 提取 `possibleIntents` 中        如果主意图为 CANCEL_ORDER 且   针对模糊提问且无显式订单 ID，
+ 所有的 isTask() 意图组合。       拥有多个 explicit `order_ids`。首先生成 `ORDER_STATUS` 进行查询：
+                                                                 注入参数 query_mode: recent_orders,
+                                                                 order_status: not_delivered.
+                                                                 后续步骤绑定为 CANCEL_ORDER，参数指向
+                                                                 特定槽位（如 target_order_slot: order_id_1）。
 ```
 
-**调用示例：**
-```java
-@Tool(description = "Cancel an unpaid or unconfirmed order")
-public String cancelOrder(String orderRef, ToolContext context) {
-    Long orderId = resolveOrderId(orderRef, context);
-    return orderGateway.cancelOrder(ToolUser.userId(context), orderId.toString());
-}
-```
+### 规划器三大分解核心模式
 
-#### 2.3.2 ToolContext（工具上下文）
+#### 1. 复合意图任务分解 (Multi-intent plan)
+当意图识别检测到用户的提问中蕴含多个属于任务型且不相同的可能意图 `possibleIntents`（如：用户说“我的订单123退款了吗？顺便帮我查一下那个鱼香肉丝的售价”）。只要意图数在 `MAX_STEPS`（设为 3）限制内，便会自动划分为各意图对应的 `TaskStep`。每个步骤绑定了实体参数和专属描述，由编排器按顺序驱动执行。
 
-工具执行时的上下文对象，包含：
-- `userId`: 当前用户ID
-- `conversationId`: 会话ID
-- 其他自定义信息
+#### 2. 批量取消计划 (Batch cancel plan)
+专门针对退款/取消等高频批量痛点。如果判定意图为 `CANCEL_ORDER`，且提取出大于或等于 2 个的显式订单 ID，将自动编排同样数目的 `CANCEL_ORDER` 步骤，在后台顺序并发逐一取消目标订单。
 
-**示例提取用户ID：**
-```java
-String userId = ToolUser.userId(context);
-```
+#### 3. 检索驱动型多步取消分解 (Lookup-driven cancel plan)
+这是系统中最具技术含量与智能化体现的模式。如果用户发出类似“帮我把最近 2 个还没送到的订单退了”这样没有携带任何明确订单号、但带有明显检索修饰词的命令，规划器会自动生成如下多步骤编排计划：
+*   **Step 1**：意图为 `ORDER_STATUS`。它在 `entities` 中自动构造了 `query_mode = "recent_orders"`, `order_count = 2`, `order_status = "not_delivered"`。指示 LLM：
+    > “请先查询最近的 2 个符合条件的订单，只返回 JSON：`{"order_ids":"id1,id2"}`。”
+*   **Step 2 & Step 3**：意图均设为 `CANCEL_ORDER`。但是，其执行参数并不直接绑定明确的 ID，而是指向**动态插槽占位符**：`target_order_slot = "order_id_1"` 以及 `target_order_slot = "order_id_2"`。
+*   **槽位级联绑定与动态状态注入**：当 Step 1 的 LLM 执行并调用订单服务返回真实的订单列表 JSON 后，编排器 `TaskOrchestratorService` 具备特异性的解析器，将直接抓取并解析提取出真实的订单 ID，并**动态对齐注入**到后续步骤的插槽占位符中，从而优雅地实现前置检索与后置操作之间的动态数据闭环和级联绑定。
 
 ---
 
-## 3. 内存系统详解
+## 5. 人工确认与高风险交互卡点 (Human Confirmation Box)
 
-Sky-AI采用**三层内存架构**：
+为了防止 AI 代理发生越权滥用或在未经用户审核的情况下执行敏感的资金或配送变更操作，系统在面临高风险意图时构建了**人工干预交互卡点**：
 
-### 3.1 Working Memory（工作记忆）
-
-**存储地点：** 请求的上下文（In-Memory）
-**时效性：** 当前请求周期
-**用途：** 存储最近4条聊天消息、意图识别结果
-
-**示例：**
 ```
-advisorContext = {
-    "intentResult": IntentRecognitionResult,
-    "allowedTools": Set<String>,
-    "userId": "user123",
-    "conversationId": "conv-456"
-}
+                [Advisor 链] / [分步任务规划器运行]
+                            │
+                            ├─► 判定为高风险意图且 requiresHumanConfirmation == true
+                            ▼
+                ┌──────────────────────────────────┐
+                │        服务端执行拦截卡点        │
+                │ 1. 挂起当前回合，停止 LLM 执行   │
+                │ 2. 将原始问题、意图等存入 Session│
+                └──────────────┬───────────────────┘
+                               │
+                               │ 推送 AgentChatConfirmationFrame 确认帧
+                               ▼
+                ┌──────────────────────────────────┐
+                │          前端用户操作界面        │
+                │ (弹出拟人化的确认弹窗询问)       │
+                └──────────────┬───────────────────┘
+                               │
+                               ├─► 用户在 UI 界面手动点击“确认操作”
+                               ▼
+                ┌──────────────────────────────────┐
+                │          WebSocket 确认帧        │
+                │  (发送带高置信度 confirmedIntent) │
+                └──────────────┬───────────────────┘
+                               │
+                               ▼
+                ┌──────────────────────────────────┐
+                │        二度驱动 / 恢复执行       │
+                │ (复用原实体参数，零冗余重入执行) │
+                └──────────────────────────────────┘
 ```
+
+1. **状态拦截**：在任何 Advisor 运行期间，或者分步计划遇到高风险步骤前，一旦判定 `requiresHumanConfirmation`（人工确认）为 true，服务端会中断当前回合，将原始问题等状态存入 WebSocket Session 中（`pendingQuestion`, `pendingIntent`）。
+2. **确认帧推送**：服务端以 `confirmation` 控制帧形式向前端发包。如果存在模型生成的 `humanConfirmationReason`（如“您有历史订单异常，此次取消可能影响权益，确认取消吗？”），则优先作为确认提示句。如果不存在，则基于本地模板兜底构建（如“是否确认取消订单 123456？”），并附带订单号与具体意图发回客户端。
+3. **闭环恢复执行**：前端弹窗展示，用户点击确认后以 WebSocket 回发确认帧。服务端检测到匹配的确认请求，会将 `Session` 内的暂存数据复原。如果是复杂编排任务，则触发 `taskOrchestratorService.continueAfterConfirmation()` 恢复执行流程；如果是普通流式请求，则将其转化为 `confirmedIntent`（信心度设为高，并完整复用之前的实体），重新输入给 Advisor 链无障碍地执行，实现完美的安全卡点。
 
 ---
 
-### 3.2 Session Memory（会话记忆）
+## 6. 三层记忆深度持久化系统与混合提取算法
 
-**存储地点：** Redis
-**键格式：** `chat:{conversationId}`
-**TTL：** 2小时（每次访问刷新）
-**容量：** 最近20条消息
+Sky-AI 采用了业内先进的三层记忆架构，以确保持久化数据的高一致性与低延时响应。
 
-**工作流程：**
-1. `ChatHistoryService.buildHistory()` 从Redis读取最近4条消息
-2. LLM识别意图、调用工具、生成回复
-3. `MemoryWriterService.writeTurn()` 异步把新消息保存回Redis
+### 3.1 三层内存架构
 
-**数据结构：**
-```json
-{
-  "messages": [
-    {"type": "user", "text": "我想取消订单123"},
-    {"type": "assistant", "text": "我帮你处理..."},
-    {"type": "tool", "name": "cancelOrder", "result": "成功取消"}
-  ]
-}
-```
+| 内存层级 | 承载组件与工作原理 | 存储媒介 | 作用范畴 |
+| :--- | :--- | :--- | :--- |
+| **工作记忆 (Working)** | 存储在当前的 `advisorContext`（基于 Java 内存 Map）。 | 局部线程内存 | 当前请求的生命周期 |
+| **会话记忆 (Session)** | 基于 `RedisChatMemoryRepository` 实现。由 Spring AI 内部组件动态读取；限制最多存储最近 **20 条** 对话记录；**TTL 为 2 小时**，每次执行 `saveAll` 对话均会自动刷新 TTL 2 小时以保活。 | Redis (Jackson JSON 序列化) | 跨页面刷新或短时断开，保持对话上下文不丢失。 |
+| **长期记忆 (Long-term)** | 映射为 `UserMemory` JPA 实体（对应 `user_memory_facts` 数据库表）。包含字段：`userId`, `dietaryPrefs`（饮食偏好）, `defaultAddress`（默认地址）, `knownIssues`（已知问题/操作备注, 长度 500）。 | PostgreSQL 关系库 | 跨会话的永久级用户行为模式与事实存储。 |
 
 ---
 
-### 3.3 Long-term Memory（长期记忆）
+### 3.2 异步长期记忆提取与本地工具强一致持久化算法
 
-**存储地点：** PostgreSQL（JPA实体）
-**表名：** `user_memory_facts`
-**字段：** userId, factKey, factValue, sourceType, updatedAt
+所有关于长期记忆事实的持久化与提取流程均在对话回合结束后，由 `MemoryWriterService` 内的 `writeTurn` 方法异步进行（方法标注了 `@Async`，执行在独立线程池中，即使模型提取失败或写入库发生延迟，也**绝对不会阻塞 REST 响应或 WebSocket 消息的发送**，对用户无任何感知）。
 
-**记忆事实类型（MemoryFactKey）：**
+长期记忆系统采用 **LLM 异步事实提取** 与 **本地代码强一致性更新** 的混合算法：
 
-| 键 | 含义 | 示例值 |
-|----|------|-------|
-| FAVORITE_DISHES | 偏好菜品 | ["鱼香肉丝", "回锅肉"] |
-| FAVORITE_FLAVORS | 偏好口味 | "清淡" |
-| DIETARY_RESTRICTIONS | 饮食限制 | "无辣，无花生" |
-| DEFAULT_ADDRESS | 默认地址 | "朝阳区建国路1号" |
-| OPERATIONAL_NOTES | 操作记录 | "上次订单异常，已补偿" |
+#### A. LLM 异步自适应提取事实与修正/遗忘机制
+如果当前对话回合不包含需要人工确认的未竟卡点，且意图非 `LOW` 置信度的 `FAQ` / `OTHER`。长期记忆处理器将当前回合的 `USER` 语句拼接为文本副本传入 LLM，并使用 `EXTRACTION_SYSTEM_PROMPT` 提示词模板指挥模型提取最新的稳定用户事实：
+- **修正机制 (Corrections)**：如果 LLM 在提取 JSON 中标有 `corrections`（修正列表），系统在调用 `UserMemoryFactService.upsertFact` 时会标记为 corrections 状态，这会在数据库中自动覆盖用户原先的事实，防止用户前后言行不一致导致记忆混乱。
+- **主动遗忘机制 (Delete)**：如果提取出的事实值（如 `favorite_flavors`）的 `value == null`，表明用户做出了类似“我再也不爱吃清淡了，把这个抹去吧”的表述，系统底层会特异性触发 `deleteFact` 操作，在 PostgreSQL 中**将此条记忆事实物理删除**。
 
-**来源类型（MemoryFactSourceType）：**
-- `USER_EXPLICIT`: 用户明确说出的 → LLM从转录文本提取
-- `USER_MANUAL`: 用户在UI中手动设置 → 直接保存
-- `INFERRED`: 系统推断的 → 从工具调用结果提取
+#### B. 非 LLM 依赖的强一致性本地工具持久化流程 (Tool Outcomes Auto-Persistence)
+依靠大语言模型从非结构化的对话文本中读取订单号、退款金额等关键信息不仅响应缓慢，而且极易发生精度偏离（ hallucination 幻觉）。为此，Sky-AI 实现了**强一致性工具响应解析器**：
+系统在启动 LLM 记忆分析前，会在 `persistToolOutcomes` 中率先对当前的对话消息链进行一遍全扫描，特异性提取所有的工具响应消息 `ToolResponseMessage`，只要工具执行返回值不包含失败头 `"FAIL:"`，就会针对特定高风险工具的成功执行自动执行精准解析与保存：
+- **`ADDRESS_MANAGEMENT`**：自动解析响应的 JSON 实体，若包含非空 `detail` 地址字段，系统会以 `MemoryFactSourceType.TOOL`（工具来源）自动将 `DEFAULT_ADDRESS`（默认地址）事实 upsert 入 PostgreSQL 中。
+- **`CHANGE_ADDRESS`**：提取响应文本末尾的分号修饰部分（新地址文本），自动覆盖入 `DEFAULT_ADDRESS` 长期记忆。
+- **`CANCEL_ORDER`**：解析成功的响应并截获其中的 `orderId`。直接以 `MemoryFactSourceType.TOOL` 向用户的 `OPERATIONAL_NOTES`（操作记录）中以历史客观陈述风格**追加写入一条事实**：
+  > `"已取消订单 {orderId}（{当前系统时间}）"`
+- **`REQUEST_REFUND`**：自动解析成功的响应得到订单 ID 与退款原因。以历史陈述风格向 `OPERATIONAL_NOTES` 中**追加写入事实**：
+  > `"已为订单 {orderId} 退款：{reason}"`
 
-**工作流程：**
-1. 对话结束，触发`MemoryWriterService.writeTurn()`
-2. 检查`requiresHumanConfirmation`
-   - 如果是，仅保存Redis会话记录，不写长期记忆
-   - 如果否，继续
-3. 收集所有`ToolResponseMessage`，调用`persistToolOutcomes()`
-   - 例如：cancelOrder成功 → 追加到OPERATIONAL_NOTES
-4. 调用LLM进行记忆提取
-   - 系统提示：指导LLM返回JSON格式的事实
-   - 用户消息：当前转录文本
-   - LLM输出示例：
-     ```json
-     {
-       "favorite_dishes": {"value": ["平菇豆腐汤"], "confidence": 1.0},
-       "favorite_flavors": {"value": "清淡", "confidence": 0.9},
-       "corrections": ["favorite_flavors"]
-     }
-     ```
-5. 合并或更新数据库中的事实
+这种硬编码的工具响应解析器在很大程度上保证了系统的关键订单事实、退款事实具有 **100% 的准确度与一致性**，与 LLM 的自适应语义事实提取相得益彰，共同撑起了 Sky-AI 高可信、多维度的客服记忆大厦。
 
 ---
 
-## 4. 意图识别流程详解
-
-### 4.1 识别客户端
-
-```java
-public interface CustomerIntentRecognitionClient {
-    IntentRecognitionResult recognize(IntentRecognitionRequest request);
-}
-```
-
-**实现：** `ChatClientCustomerIntentRecognitionClient`
-
-### 4.2 识别请求结构
-
-```java
-record IntentRecognitionRequest(
-    String userText,           // 用户问题
-    List<String> history       // 最近4条消息 + 已知问题摘要
-) {}
-```
-
-### 4.3 识别结果结构
-
-```java
-record IntentRecognitionResult(
-    IntentType intent,                          // 识别的意图
-    ConfidenceLevel confidence,                 // 信心度
-    Map<String, String> entities,               // 提取的实体（如order_id）
-    List<IntentType> possibleIntents,           // 其他可能的意图
-    String clarificationQuestion,               // 澄清问题（低置信度时）
-    boolean requiresHumanConfirmation,          // 是否需要人工确认
-    String humanConfirmationReason              // 人工确认原因
-) {}
-```
-
-### 4.4 低置信度澄清逻辑
-
-当`confidence == LOW`：
-1. LLM生成`clarificationQuestion`
-2. Controller直接返回澄清问题给用户，不执行工具调用
-3. 用户补充信息后，重新发起请求
-
-**示例：**
-```
-用户: "帮我取消那个订单"
-LLM低置信度识别 → 返回: "你是想取消哪个订单？请提供订单号"
-用户: "订单号是123456"
-重新识别 → 高置信度 → 执行cancelOrder工具
-```
-
----
-
-## 5. 工具调用与MCP集成
-
-### 5.1 本地工具（@Tool注解）
-
-通过Spring AI的`@Tool`注解，在OrderTools/CartTools等组件中定义
-
-```java
-@Component
-public class OrderTools {
-    @Tool(description = "Cancel an unpaid or unconfirmed order")
-    public String cancelOrder(
-        @ToolParam(description = "Order ID") String orderRef,
-        ToolContext context
-    ) {
-        // ...
-    }
-}
-```
-
-### 5.2 MCP（Model Context Protocol）服务器
-
-在`application.yml`配置MCP服务器：
-
-```yaml
-spring:
-  ai:
-    mcp:
-      client:
-        sse:
-          connections:
-            maps-server:
-              url: ${MCP_MAPS_URL:}
-            payments-server:
-              url: ${MCP_PAYMENTS_URL:}
-            notifications-server:
-              url: ${MCP_NOTIFICATIONS_URL:}
-```
-
-**MCP集成的优势：**
-- 工具由独立服务提供（解耦）
-- Spring AI自动发现和注册工具
-- 与本地`@Tool`方法无缝配合
-
-**MCP工具示例：**
-- maps-server: 地理位置相关工具
-- payments-server: 支付相关工具
-- notifications-server: 通知相关工具
-
----
-
-## 6. 完整交互示例
-
-### 场景：用户取消订单
-
-```
-请求：
-  GET /ai/ask?question=帮我取消订单123&conversationId=conv-001&userId=user-001
-
-↓
-
-1. ChatController.ask()
-   ├─ 调用 agentChatService.recognizeIntent()
-   │  └─ 返回: IntentRecognitionResult(CANCEL_ORDER, HIGH, {order_id: "123"}, ...)
-   └─ 调用 agentChatService.ask(question, conversationId, userId, preIntent)
-
-↓
-
-2. Advisor Chain 执行顺序：
-
-   a) IntentRecognitionAdvisor
-      - 已有preRecognizedIntent，直接使用
-      - 将result放入context["intentResult"]
-
-   b) UserContextAdvisor
-      - 读取intentResult = CANCEL_ORDER
-      - 计算allowedTools = {searchOrders, cancelOrder}
-      - 放入context["allowedTools"]
-      - 从DB查询OPERATIONAL_NOTES
-      - 注入系统提示
-
-   c) MessageChatMemoryAdvisor
-      - 从Redis读取conversationId的历史消息
-
-   d) QuestionAnswerAdvisor
-      - CANCEL_ORDER不是FAQ，跳过
-
-   e) ToolFilterAdvisor
-      - 从context读取allowedTools
-      - 只注册这两个工具到LLM
-
-   f) ChatClient
-      - 调用LLM（OpenAI）
-      - LLM决定调用cancelOrder工具
-      - OrderTools.cancelOrder()执行
-      - 调用sky-server: PUT /ai/customer/orders/123/cancel
-      - 返回: "订单123已取消"
-      - LLM生成最终回复
-
-↓
-
-3. MemoryWriterService.writeTurn() 异步执行
-   - 保存新消息到Redis (conversationId的消息列表)
-   - 提取cancelOrder工具的结果
-   - 追加到user-001的OPERATIONAL_NOTES: "Cancelled order 123 on 2026-05-18"
-   - 更新user_memory_facts表
-
-↓
-
-4. 返回给客户端：
-   {
-     "question": "帮我取消订单123",
-     "answer": "好的，我已经为你取消了订单123。"
-   }
-```
-
----
-
-## 7. 关键设计决策
-
-### 7.1 为什么使用Advisor链？
-
-✅ **优点：**
-- 职责分离：每个Advisor做一件事
-- 易于扩展：添加新Advisor无需修改现有代码
-- 灵活组合：可通过order()控制执行顺序
-- Spring AI标准：遵循框架约定
-
-❌ **传统做法的问题：**
-```java
-// 不推荐：一个大Service混合所有逻辑
-class ChatService {
-    - recognizeIntent()
-    - injectContext()
-    - filterTools()
-    - callLLM()
-    - persistMemory()
-}
-```
-
-### 7.2 为什么分离预识别和链内识别？
-
-```java
-// Controller预识别
-IntentRecognitionResult preIntent = agentChatService.recognizeIntent(question);
-
-if (preIntent.clarificationQuestion != null) {
-    return clarificationQuestion;  // ← 快速路径，避免整个链执行
-}
-
-// 链内再识别
-IntentRecognitionAdvisor {
-    IntentRecognitionResult result = 
-        preRecognizedIntent != null ? preRecognizedIntent : recognize();
-}
-```
-
-**优点：**
-- 低置信度时可立即返回澄清问题
-- 避免不必要的工具调用
-- 减少延迟
-
-### 7.3 为什么使用@Async持久化？
-
-```java
-@Service
-public class MemoryWriterService {
-    @Async
-    public void writeTurn(String userId, String conversationId, ...) {
-        // 不阻塞API响应
-    }
-}
-```
-
-**优点：**
-- API响应延迟不受DB写入影响
-- 并发能力强
-- 内存提取失败不影响用户体验
-
-**风险：**
-- 可能丢失内存（但降级可接受）
-- 需要异步错误处理
-
----
-
-## 8. 调试和监控
-
-### 8.1 关键日志点
-
-```java
-// IntentRecognitionAdvisor
-log.debug("认识意图: {} 信心度: {}", result.intent(), result.confidence());
-
-// UserContextAdvisor
-log.info("UserContextAdvisor intentResult: {}", intentResult);
-log.info("Computed allowedTools: {}", allowedTools);
-
-// ToolFilterAdvisor
-log.info("ToolFilterAdvisor tools count={}, tools={}", 
-    allowedTools.size(), previewTools(allowedTools));
-
-// MemoryWriterService
-log.debug("extracted memory facts userId={} favorite_dishes.value={} ...", userId, ...);
-```
-
-### 8.2 调试技巧
-
-**1. 打印advisorContext**
-```java
-// 在任何Advisor中
-log.info("Current context: {}", chatClientRequest.context().keySet());
-```
-
-**2. Redis会话查询**
-```bash
-redis-cli
-KEYS "chat:*"
-GET "chat:conv-001"
-```
-
-**3. PostgreSQL记忆查询**
-```sql
-SELECT * FROM user_memory_facts WHERE user_id = 'user-001';
-```
-
-**4. HTTP工具调用日志**
-```java
-// OrderGateway中启用调试
-okhttp3.logging.HttpLoggingInterceptor
-```
-
----
-
-## 9. 扩展点
-
-### 9.1 添加新的Advisor
-
-1. 实现`CallAdvisor`接口
-2. 标注`@Component`
-3. 实现`adviseCall()`和`adviseStream()`
-4. 通过`getOrder()`控制顺序
-
-```java
-@Component
-public class MyNewAdvisor implements CallAdvisor, StreamAdvisor {
-    @Override
-    public ChatClientResponse adviseCall(ChatClientRequest request, CallAdvisorChain chain) {
-        // 修改request或链路
-        return chain.nextCall(request);
-    }
-
-    @Override
-    public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE + 2;  // 在这个位置执行
-    }
-}
-```
-
-### 9.2 添加新的意图类型
-
-1. 在`IntentType`枚举中添加新值
-2. 在`UserContextAdvisor.buildContextBlock()`中处理
-3. 在`UserContextAdvisor.allowedTools()`中映射工具
-4. 更新LLM提示词
-
-### 9.3 添加新的记忆类型
-
-1. 在`MemoryFactKey`中添加新键
-2. 在`MemoryWriterService.EXTRACTION_SYSTEM_PROMPT`中指导LLM
-3. 在`UserContextAdvisor.formatMemoryLine()`中格式化显示
-
----
-
-## 10. 常见问题
-
-**Q: 意图识别失败会怎样？**
-A: 返回默认的`IntentType.OTHER`，`ConfidenceLevel.LOW`，不注入上下文，不调用工具。
-
-**Q: 工具调用超时怎么办？**
-A: Sky-server网关调用超时或返回错误，LLM收到失败响应，可能重试或告知用户。
-
-**Q: 内存提取失败怎么办？**
-A: `MemoryWriterService`是@Async的，异常不会影响API响应，但会丢失本次提取的内存。
-
-**Q: 如何清除用户的长期记忆？**
-A: 直接删除`user_memory_facts`表中该用户的记录，或在UI提供清除选项。
-
-**Q: 如何支持多语言？**
-A: LLM和意图枚举已支持，需在提示词中指定语言。
-
----
-
-这就是Sky-AI的完整运作流程！核心是Advisor链的巧妙组织，每一环都可独立扩展。
-
+这就是 Sky-AI 智能客服 Agent 的整体设计与技术脉络。其以 Advisor 链为依托，借助分步任务编排和强韧的安全阻断与强一致记忆，构建了现代化大模型应用极其珍贵的商业化生产级闭环。
