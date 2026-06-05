@@ -53,31 +53,41 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
         // 根据拿到的意图识别的结果，动态的构建LLM可用工具
         IntentRecognitionResult intentResult = resolveIntent(chatClientRequest);
-        chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
+        Map<String, Object> context = new java.util.HashMap<>(chatClientRequest.context());
+        context.put("allowedTools", allowedTools(intentResult));
+        
         String userId = stringParam(chatClientRequest, "userId");
         String contextBlock = buildContextBlock(chatClientRequest, intentResult, userId);
-        if (!StringUtils.hasText(contextBlock)) {
-            return callAdvisorChain.nextCall(chatClientRequest);
+        
+        ChatClientRequest.Builder builder = chatClientRequest.mutate().context(context);
+        
+        if (StringUtils.hasText(contextBlock)) {
+            List<Message> instructions = new ArrayList<>(chatClientRequest.prompt().getInstructions());
+            instructions.add(0, new SystemMessage(contextBlock));
+            Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
+            builder.prompt(prompt);
         }
-        List<Message> instructions = new ArrayList<>(chatClientRequest.prompt().getInstructions());
-        instructions.add(0, new SystemMessage(contextBlock));
-        Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
-        return callAdvisorChain.nextCall(chatClientRequest.mutate().prompt(prompt).build());
+        return callAdvisorChain.nextCall(builder.build());
     }
 
     @Override
     public reactor.core.publisher.Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
         IntentRecognitionResult intentResult = resolveIntent(chatClientRequest);
-        chatClientRequest.context().put("allowedTools", allowedTools(intentResult));
+        Map<String, Object> context = new java.util.HashMap<>(chatClientRequest.context());
+        context.put("allowedTools", allowedTools(intentResult));
+        
         String userId = stringParam(chatClientRequest, "userId");
         String contextBlock = buildContextBlock(chatClientRequest, intentResult, userId);
-        if (!StringUtils.hasText(contextBlock)) {
-            return streamAdvisorChain.nextStream(chatClientRequest);
+        
+        ChatClientRequest.Builder builder = chatClientRequest.mutate().context(context);
+        
+        if (StringUtils.hasText(contextBlock)) {
+            List<Message> instructions = new ArrayList<>(chatClientRequest.prompt().getInstructions());
+            instructions.add(0, new SystemMessage(contextBlock));
+            Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
+            builder.prompt(prompt);
         }
-        List<Message> instructions = new ArrayList<>(chatClientRequest.prompt().getInstructions());
-        instructions.add(0, new SystemMessage(contextBlock));
-        Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
-        return streamAdvisorChain.nextStream(chatClientRequest.mutate().prompt(prompt).build());
+        return streamAdvisorChain.nextStream(builder.build());
     }
 
     @Override

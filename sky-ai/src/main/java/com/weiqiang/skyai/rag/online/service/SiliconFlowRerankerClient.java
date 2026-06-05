@@ -60,7 +60,8 @@ public class SiliconFlowRerankerClient implements RerankerClient {
             if (score == null) {
 //                throw new IllegalStateException("SiliconFlow reranker response missing score for candidate " + i);
                 log.warn("SiliconFlow 响应缺失索引 {} 的分数，将使用默认极低分", i);
-                rerankScores.put(i, 0.000001); // 给一个保底分，防止 NullPointerException 或逻辑中断
+                score = 0.000001;
+                rerankScores.put(i, score); // 给一个保底分，防止 NullPointerException 或逻辑中断
             }
             ranked.add(candidates.get(i).withRerankScore(score));
         }

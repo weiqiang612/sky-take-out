@@ -15,6 +15,7 @@ import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.springframework.lang.NonNull;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Set;
@@ -39,7 +40,7 @@ public class ToolFilterAdvisor implements CallAdvisor, StreamAdvisor {
 
     @Override
     @NonNull
-    public reactor.core.publisher.Flux<ChatClientResponse> adviseStream(@NonNull ChatClientRequest chatClientRequest, @NonNull StreamAdvisorChain streamAdvisorChain) {
+    public Flux<ChatClientResponse> adviseStream(@NonNull ChatClientRequest chatClientRequest, @NonNull StreamAdvisorChain streamAdvisorChain) {
         log.info("ToolFilterAdvisor start advising for request.context().keyset(): {}", chatClientRequest.context().keySet());
         return applyToolFilter(chatClientRequest, prompt -> streamAdvisorChain.nextStream(chatClientRequest.mutate().prompt(prompt).build()));
     }
