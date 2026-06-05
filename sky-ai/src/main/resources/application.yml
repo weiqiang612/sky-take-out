@@ -59,3 +59,9 @@ skyai:
           - parentText
           - parentDocument
           - documentText
+
+sky:
+  ai:
+    advisor:
+      safe-tool-call:
+        max-rounds: ${SKY_AI_SAFE_TOOL_CALL_MAX_ROUNDS:4}

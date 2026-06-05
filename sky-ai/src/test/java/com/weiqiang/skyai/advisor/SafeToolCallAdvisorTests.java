@@ -23,7 +23,7 @@ class SafeToolCallAdvisorTests {
 
     @Test
     void stopsOnDuplicateToolCallSignature() {
-        SafeToolCallAdvisor advisor = new SafeToolCallAdvisor(mock(ToolCallingManager.class));
+        SafeToolCallAdvisor advisor = new SafeToolCallAdvisor(mock(ToolCallingManager.class), 4);
         ChatClientRequest request = new ChatClientRequest(new Prompt("hi"), new HashMap<>());
         advisor.doInitializeLoop(request, mock(CallAdvisorChain.class));
 
@@ -33,12 +33,12 @@ class SafeToolCallAdvisorTests {
 
         assertTrue(first.chatResponse().hasToolCalls());
         assertFalse(second.chatResponse().hasToolCalls());
-        assertTrue(second.chatResponse().getResult().getOutput().getText().contains("已查询到的信息不足以继续自动处理"));
+        assertTrue(second.chatResponse().getResult().getOutput().getText().contains("抱歉，我目前无法自动处理该请求"));
     }
 
     @Test
     void stopsAfterFourToolCallRounds() {
-        SafeToolCallAdvisor advisor = new SafeToolCallAdvisor(mock(ToolCallingManager.class));
+        SafeToolCallAdvisor advisor = new SafeToolCallAdvisor(mock(ToolCallingManager.class), 4);
         ChatClientRequest request = new ChatClientRequest(new Prompt("hi"), new HashMap<>());
         advisor.doInitializeLoopStream(request, mock(StreamAdvisorChain.class));
 
@@ -52,6 +52,24 @@ class SafeToolCallAdvisorTests {
 
         assertTrue(fourth.chatResponse().hasToolCalls());
         assertFalse(fifth.chatResponse().hasToolCalls());
+    }
+
+    @Test
+    void stopsAfterCustomToolCallRounds() {
+        SafeToolCallAdvisor advisor = new SafeToolCallAdvisor(mock(ToolCallingManager.class), 2);
+        ChatClientRequest request = new ChatClientRequest(new Prompt("hi"), new HashMap<>());
+        advisor.doInitializeLoopStream(request, mock(StreamAdvisorChain.class));
+
+        ChatClientResponse second = null;
+        for (int i = 0; i < 2; i++) {
+            ChatClientResponse response = responseWithToolCall(request.context(), "searchDishes", "{\"keyword\":\"dish" + i + "\"}");
+            second = advisor.doAfterStream(response, mock(StreamAdvisorChain.class));
+        }
+        ChatClientResponse third = advisor.doAfterStream(responseWithToolCall(request.context(), "searchDishes",
+                "{\"keyword\":\"dish3\"}"), mock(StreamAdvisorChain.class));
+
+        assertTrue(second.chatResponse().hasToolCalls());
+        assertFalse(third.chatResponse().hasToolCalls());
     }
 
     private ChatClientResponse responseWithToolCall(Map<String, Object> context, String name, String arguments) {

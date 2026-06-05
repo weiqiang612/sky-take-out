@@ -11,6 +11,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.HashSet;
 import java.util.List;
@@ -21,11 +22,13 @@ import java.util.Set;
 public class SafeToolCallAdvisor extends ToolCallAdvisor {
 
     private static final String STATE_KEY = SafeToolCallAdvisor.class.getName() + ".state";
-    private static final int MAX_TOOL_CALL_ROUNDS = 4;
-    private static final String STOP_MESSAGE = "已查询到的信息不足以继续自动处理，请你确认一下需要的菜品或改用更明确的说法。";
+    private final int maxToolCallRounds;
+    private static final String STOP_MESSAGE = "抱歉，我目前无法自动处理该请求。请您尝试用更具体或简单的方式重新描述，或者联系客服人员帮您处理。";
 
-    public SafeToolCallAdvisor(ToolCallingManager toolCallingManager) {
+    public SafeToolCallAdvisor(ToolCallingManager toolCallingManager,
+                               @Value("${sky.ai.advisor.safe-tool-call.max-rounds:4}") int maxToolCallRounds) {
         super(toolCallingManager, Ordered.LOWEST_PRECEDENCE - 100, true, false);
+        this.maxToolCallRounds = maxToolCallRounds;
     }
 
     @Override
@@ -69,7 +72,7 @@ public class SafeToolCallAdvisor extends ToolCallAdvisor {
                 return stop(chatClientResponse);
             }
         }
-        if (loopState.toolCallRounds >= MAX_TOOL_CALL_ROUNDS) {
+        if (loopState.toolCallRounds >= maxToolCallRounds) {
             return stop(chatClientResponse);
         }
         loopState.toolCallRounds++;
