@@ -14,6 +14,8 @@ import com.sky.service.ShoppingCartService;
 import com.sky.vo.OrderVO;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,7 +65,7 @@ class AiCustomerControllerContractTest {
     @Test
     void recentOrdersShouldWrapPageResult() {
         OrdersService ordersService = mock(OrdersService.class);
-        PageResult pageResult = new PageResult(2, List.of(mock(OrderVO.class), mock(OrderVO.class)));
+        PageResult pageResult = new PageResult(2, Arrays.asList(mock(OrderVO.class), mock(OrderVO.class)));
         when(ordersService.page(org.mockito.ArgumentMatchers.any())).thenReturn(pageResult);
         AiCustomerController controller = controller(ordersService);
 
@@ -77,7 +79,7 @@ class AiCustomerControllerContractTest {
     @Test
     void defaultAddressShouldReturnErrorWhenNoDefaultExists() {
         AddressBookService addressBookService = mock(AddressBookService.class);
-        when(addressBookService.list(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+        when(addressBookService.list(org.mockito.ArgumentMatchers.any())).thenReturn(Collections.emptyList());
         AiCustomerController controller = controller(addressBookService);
 
         Result<AddressBook> result = controller.defaultAddress(7L);
