@@ -146,4 +146,39 @@ class UserContextAdvisorTests {
 
         assertTrue(block == null || block.isEmpty());
     }
+
+    @Test
+    void buildContextBlockFetchesRecentOrderWhenOrderIdUnavailable() {
+        UserMemoryFactService userMemoryFactService = mock(UserMemoryFactService.class);
+        UserProfileMemoryProperties properties = new UserProfileMemoryProperties();
+        UserProfileInjectionMetrics metrics = mock(UserProfileInjectionMetrics.class);
+        com.weiqiang.skyai.tools.gateway.OrderGateway orderGateway = mock(com.weiqiang.skyai.tools.gateway.OrderGateway.class);
+        com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        when(orderGateway.listRecentOrders("u1", 1)).thenReturn(
+                "{\"records\":[{\"number\":\"123456\",\"orderTime\":\"2026-06-24 10:00:00\",\"amount\":88.5,\"orderDishes\":\"宫保鸡丁 x1\"}]}"
+        );
+
+        UserContextAdvisor advisor = new UserContextAdvisor(
+                userMemoryFactService, properties, metrics, orderGateway, objectMapper
+        );
+
+        IntentRecognitionResult intentResult = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of(),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                false,
+                null
+        );
+
+        String block = ReflectionTestUtils.invokeMethod(advisor, "buildContextBlock", intentResult, "u1");
+
+        assertTrue(block.contains("The user did not specify an order ID, but their most recent order is:"));
+        assertTrue(block.contains("Order number: 123456"));
+        assertTrue(block.contains("Time: 2026-06-24 10:00:00"));
+        assertTrue(block.contains("Amount: 88.5 CNY"));
+        assertTrue(block.contains("Items: 宫保鸡丁 x1"));
+    }
 }

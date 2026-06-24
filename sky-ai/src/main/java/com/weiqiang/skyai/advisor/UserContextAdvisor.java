@@ -1,5 +1,7 @@
 package com.weiqiang.skyai.advisor;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.ConfidenceLevel;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
@@ -8,6 +10,7 @@ import com.weiqiang.skyai.memory.model.MemoryFactKey;
 import com.weiqiang.skyai.memory.model.MemoryFactSourceType;
 import com.weiqiang.skyai.memory.model.UserMemoryFact;
 import com.weiqiang.skyai.memory.service.UserMemoryFactService;
+import com.weiqiang.skyai.tools.gateway.OrderGateway;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -37,57 +40,59 @@ import java.util.stream.Collectors;
 @Component
 public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
+    private static final String UNAVAILABLE = "unavailable";
+
     private final UserMemoryFactService userMemoryFactService;
     private final UserProfileMemoryProperties userProfileMemoryProperties;
     private final UserProfileInjectionMetrics userProfileInjectionMetrics;
+    private final OrderGateway orderGateway;
+    private final ObjectMapper objectMapper;
 
     public UserContextAdvisor(UserMemoryFactService userMemoryFactService,
                               UserProfileMemoryProperties userProfileMemoryProperties,
                               UserProfileInjectionMetrics userProfileInjectionMetrics) {
+        this(userMemoryFactService, userProfileMemoryProperties, userProfileInjectionMetrics, null, new ObjectMapper());
+    }
+
+    public UserContextAdvisor(UserMemoryFactService userMemoryFactService,
+                              UserProfileMemoryProperties userProfileMemoryProperties,
+                              UserProfileInjectionMetrics userProfileInjectionMetrics,
+                              OrderGateway orderGateway,
+                              ObjectMapper objectMapper) {
         this.userMemoryFactService = userMemoryFactService;
         this.userProfileMemoryProperties = userProfileMemoryProperties;
         this.userProfileInjectionMetrics = userProfileInjectionMetrics;
+        this.orderGateway = orderGateway;
+        this.objectMapper = objectMapper;
     }
 
     @Override
     public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
-        // 根据拿到的意图识别的结果，动态的构建LLM可用工具
-        IntentRecognitionResult intentResult = resolveIntent(chatClientRequest);
-        Map<String, Object> context = new java.util.HashMap<>(chatClientRequest.context());
-        context.put("allowedTools", allowedTools(intentResult));
-        
-        String userId = stringParam(chatClientRequest, "userId");
-        String contextBlock = buildContextBlock(chatClientRequest, intentResult, userId);
-        
-        ChatClientRequest.Builder builder = chatClientRequest.mutate().context(context);
-        
-        if (StringUtils.hasText(contextBlock)) {
-            List<Message> instructions = new ArrayList<>(chatClientRequest.prompt().getInstructions());
-            instructions.add(0, new SystemMessage(contextBlock));
-            Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
-            builder.prompt(prompt);
-        }
-        return callAdvisorChain.nextCall(builder.build());
+        return callAdvisorChain.nextCall(mutateRequestWithContext(chatClientRequest));
     }
 
     @Override
     public reactor.core.publisher.Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
+        return streamAdvisorChain.nextStream(mutateRequestWithContext(chatClientRequest));
+    }
+
+    private ChatClientRequest mutateRequestWithContext(ChatClientRequest chatClientRequest) {
         IntentRecognitionResult intentResult = resolveIntent(chatClientRequest);
         Map<String, Object> context = new java.util.HashMap<>(chatClientRequest.context());
         context.put("allowedTools", allowedTools(intentResult));
-        
+
         String userId = stringParam(chatClientRequest, "userId");
         String contextBlock = buildContextBlock(chatClientRequest, intentResult, userId);
-        
+
         ChatClientRequest.Builder builder = chatClientRequest.mutate().context(context);
-        
+
         if (StringUtils.hasText(contextBlock)) {
             List<Message> instructions = new ArrayList<>(chatClientRequest.prompt().getInstructions());
             instructions.add(0, new SystemMessage(contextBlock));
             Prompt prompt = new Prompt(instructions, chatClientRequest.prompt().getOptions());
             builder.prompt(prompt);
         }
-        return streamAdvisorChain.nextStream(builder.build());
+        return builder.build();
     }
 
     @Override
@@ -98,6 +103,10 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     @Override
     public int getOrder() {
         return Ordered.HIGHEST_PRECEDENCE + 1;
+    }
+
+    private String buildContextBlock(IntentRecognitionResult intentResult, String userId) {
+        return buildContextBlock(null, intentResult, userId);
     }
 
     private String buildContextBlock(ChatClientRequest request, IntentRecognitionResult intentResult, String userId) {
@@ -125,8 +134,51 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         // 根据不同的意图类型，注入额外的上下文信息，帮助模型更好的理解用户的需求和背景
         switch (intentType) {
             case ORDER_STATUS, TRACK_DELIVERY -> parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
-            case CANCEL_ORDER, REQUEST_REFUND ->
-                    parts.add(sentence("Known issues should be treated as persistent operational memory when present."));
+            case CANCEL_ORDER, REQUEST_REFUND -> {
+                parts.add(sentence("Known issues should be treated as persistent operational memory when present."));
+                String orderId = referencedOrderId(intentResult);
+                if (UNAVAILABLE.equals(orderId)) {
+                    if (orderGateway != null && StringUtils.hasText(userId)) {
+                        try {
+                            String recentOrdersJson = orderGateway.listRecentOrders(userId, 1);
+                            if (StringUtils.hasText(recentOrdersJson) && !recentOrdersJson.startsWith("FAIL:")) {
+                                JsonNode root = objectMapper.readTree(recentOrdersJson);
+                                JsonNode records = root.path("records");
+                                JsonNode latestOrder = null;
+                                if (records.isArray() && records.size() > 0) {
+                                    latestOrder = records.get(0);
+                                } else if (root.isArray() && root.size() > 0) {
+                                    latestOrder = root.get(0);
+                                }
+                                if (latestOrder != null) {
+                                    String number = latestOrder.path("number").asText(null);
+                                    String orderTime = latestOrder.path("orderTime").asText(null);
+                                    String amount = latestOrder.path("amount").asText(null);
+                                    String orderDishes = latestOrder.path("orderDishes").asText(null);
+
+                                    if (StringUtils.hasText(number)) {
+                                        StringBuilder sb = new StringBuilder("The user did not specify an order ID, but their most recent order is: ");
+                                        sb.append("Order number: ").append(number);
+                                        if (StringUtils.hasText(orderTime)) {
+                                            sb.append(", Time: ").append(orderTime);
+                                        }
+                                        if (StringUtils.hasText(amount)) {
+                                            sb.append(", Amount: ").append(amount).append(" CNY");
+                                        }
+                                        if (StringUtils.hasText(orderDishes)) {
+                                            sb.append(", Items: ").append(orderDishes);
+                                        }
+                                        sb.append(". Recommend this order as the default action target.");
+                                        parts.add(sentence(sb.toString()));
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("Failed to fetch or parse recent order for context injection", e);
+                        }
+                    }
+                }
+            }
             case REPORT_MISSING_ITEM -> parts.add(sentence("Order id: " + referencedOrderId(intentResult)));
             case CHANGE_ADDRESS ->
                     parts.add(sentence("The current user may manage their own saved addresses directly."));
@@ -234,7 +286,11 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
             return;
         }
         Set<String> keyValues = factKeys.stream().map(MemoryFactKey::value).collect(Collectors.toSet());
-        List<UserMemoryFact> facts = userMemoryFactService.findFactsSorted(userId).stream()
+        List<UserMemoryFact> rawFacts = userMemoryFactService.findFactsSorted(userId);
+        if (rawFacts == null) {
+            rawFacts = List.of();
+        }
+        List<UserMemoryFact> facts = rawFacts.stream()
                 .filter(fact -> keyValues.contains(fact.getFactKey()))
                 .toList();
         for (UserMemoryFact fact : facts) {
@@ -291,7 +347,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
 
     private String referencedOrderId(IntentRecognitionResult intentResult) {
         String orderId = intentResult == null || intentResult.entities() == null ? null : intentResult.entities().get("order_id");
-        return StringUtils.hasText(orderId) ? orderId : "unavailable";
+        return StringUtils.hasText(orderId) ? orderId : UNAVAILABLE;
     }
 
     private String joinSentences(List<String> parts) {
@@ -299,7 +355,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     }
 
     private String sentence(String text) {
-        String value = StringUtils.hasText(text) ? text.trim() : "unavailable";
+        String value = StringUtils.hasText(text) ? text.trim() : UNAVAILABLE;
         return value.endsWith(".") ? value : value + ".";
     }
 
@@ -366,6 +422,9 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
     }
 
     private Boolean currentFlag(ChatClientRequest request, String key) {
+        if (request == null || request.context() == null) {
+            return null;
+        }
         Object value = request.context().get(key);
         return value instanceof Boolean bool ? bool : null;
     }

@@ -42,7 +42,7 @@ skyai:
     online:
       top-k: ${SKY_AI_RETRIEVAL_TOP_K:15} # Embedding retrieval top-k results
       top-n: ${SKY_AI_RETRIEVAL_TOP_N:2} # Reranking top-n results from embedding retrieval
-      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.55}
+      similarity-threshold: ${SKY_AI_RETRIEVAL_SIMILARITY_THRESHOLD:0.55} #
       fallback-to-embedding-results-on-rerank-failure: ${SKY_AI_RETRIEVAL_FALLBACK_ON_RERANK_FAILURE:true}
       query-expansion:
         enabled: ${SKY_AI_QUERY_EXPANSION_ENABLED:false}

@@ -53,9 +53,12 @@ public class CustomerIntentRecognitionService {
         }
 
         if (isHighRisk(intent) && !requiresHumanConfirmation) {
-            requiresHumanConfirmation = true;
-            if (!StringUtils.hasText(humanConfirmationReason)) {
-                humanConfirmationReason = "该意图属于高风险操作，需要人工确认后再继续处理。";
+            boolean hasOrderId = entities != null && StringUtils.hasText(entities.getOrDefault("order_id", null));
+            if (hasOrderId) {
+                requiresHumanConfirmation = true;
+                if (!StringUtils.hasText(humanConfirmationReason)) {
+                    humanConfirmationReason = "该意图属于高风险操作，需要人工确认后再继续处理。";
+                }
             }
         }
 
@@ -83,6 +86,6 @@ public class CustomerIntentRecognitionService {
     }
 
     private boolean isHighRisk(IntentType intent) {
-        return intent != null && intent.isHighRisk();
+        return intent.isHighRisk();
     }
 }

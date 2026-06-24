@@ -445,7 +445,7 @@ public class TaskOrchestratorService {
             }
             return ORDER_OUTPUT_MAPPER.readTree(candidate);
         } catch (Exception ex) {
-            log.debug("Unable to parse structured step output: {}", answerPreview(text));
+            log.warn("Unable to parse structured step output: {}", answerPreview(text));
             return null;
         }
     }

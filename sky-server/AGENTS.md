@@ -20,5 +20,5 @@
 
 ## Documentation
 - Standards: root `docs/1-standards/README.md`
-- Constraints: root `docs/2-constraints/`
-- Tasks: root `docs/3-tasks/`
+- Constraints: root `docs/3-constraints/`
+- Tasks: root `docs/4-tasks/`

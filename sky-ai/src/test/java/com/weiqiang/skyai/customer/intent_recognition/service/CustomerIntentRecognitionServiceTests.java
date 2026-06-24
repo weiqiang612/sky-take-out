@@ -128,4 +128,25 @@ class CustomerIntentRecognitionServiceTests {
             assertEquals("可以补充一下你的具体诉求吗，例如订单号、商品或想处理的事项？", result.clarificationQuestion());
         }
     }
+
+    @Test
+    void recognizeDoesNotForceHumanConfirmationForHighRiskIntentWithoutOrderId() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(CustomerIntentRecognitionTestConfiguration.class)) {
+            MutableCustomerIntentRecognitionClientStub client = context.getBean(MutableCustomerIntentRecognitionClientStub.class);
+            client.setResult(new IntentRecognitionResult(
+                    IntentType.CANCEL_ORDER,
+                    ConfidenceLevel.HIGH,
+                    Map.of(),
+                    List.of(),
+                    null,
+                    false,
+                    null
+            ));
+
+            CustomerIntentRecognitionService service = context.getBean(CustomerIntentRecognitionService.class);
+            IntentRecognitionResult result = service.recognize(new IntentRecognitionRequest("我要取消订单", List.of()));
+
+            assertFalse(result.requiresHumanConfirmation());
+        }
+    }
 }
