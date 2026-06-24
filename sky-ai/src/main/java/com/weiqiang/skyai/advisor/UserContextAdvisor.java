@@ -145,6 +145,9 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
                             String recentOrdersJson = orderGateway.listRecentOrders(userId, 1);
                             if (StringUtils.hasText(recentOrdersJson) && !recentOrdersJson.startsWith("FAIL:")) {
                                 JsonNode root = objectMapper.readTree(recentOrdersJson);
+                                if (root.has("data")) {
+                                    root = root.path("data");
+                                }
                                 JsonNode records = root.path("records");
                                 JsonNode latestOrder = null;
                                 if (records.isArray() && records.size() > 0) {
