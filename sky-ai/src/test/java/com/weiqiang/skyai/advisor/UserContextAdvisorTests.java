@@ -180,5 +180,6 @@ class UserContextAdvisorTests {
         assertTrue(block.contains("Time: 2026-06-24 10:00:00"));
         assertTrue(block.contains("Amount: 88.5 CNY"));
         assertTrue(block.contains("Items: 宫保鸡丁 x1"));
+        assertTrue(block.contains("Ask the user to confirm this candidate before calling any high-risk tool"));
     }
 }

@@ -47,12 +47,18 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
                    - 用 `possible_intents` 表达执行顺序，通常是 `order_status` 在前、最终操作在后。
                    - 在 entities 中提供查询线索，例如 `{"order_count":"2","order_status":"not_delivered"}`。
                    - 这种场景下 `requires_human_confirmation` 先保持 `false`，由后端先查询再在确认阶段展示真实订单号。
-                6. 高风险意图：`cancel_order`、`request_refund`、`change_address`、`report_missing_item`
+                6. 如果用户说的是“刚刚的订单/最近一单/你直接查一下/你帮我查一下”这类可由订单历史推断的请求：
+                   - 不要因为缺少订单号就返回 `other`。
+                   - 如果用户要取消或退款，intent 仍设为 `cancel_order` 或 `request_refund`。
+                   - entities 可以为空，或只写 `{"query_mode":"recent_orders","order_count":"1"}`。
+                   - `requires_human_confirmation` 必须保持 `false`，`clarification_question` 必须为空字符串 `""`。
+                   - 后端会先查最近订单，再让用户确认候选订单；你不能提前要求用户手动提供订单号。
+                7. 高风险意图：`cancel_order`、`request_refund`、`change_address`、`report_missing_item`
                    - 如果已经拿到可执行的真实目标实体，必须设置 `requires_human_confirmation=true`。
                    - `human_confirmation_reason` 必须说明具体原因。
                    - `clarification_question` 必须为空字符串 `""`。
                    - 如果需要先查单才能得到目标，不要提前把它当作已确认的可执行操作。
-                7. 所有未填写的字符串字段都必须输出为空字符串 `""`。
+                8. 所有未填写的字符串字段都必须输出为空字符串 `""`。
 
                 ### 意图示例
                 - `order_status`: 查询订单状态、进度、是否出餐
@@ -113,6 +119,17 @@ public class ChatClientCustomerIntentRecognitionClient implements CustomerIntent
                   "requires_human_confirmation": false,
                   "human_confirmation_reason": "",
                   "clarification_question": "请补充你要操作的订单号或更多信息。"
+                }
+
+                5. 无订单号但可查最近订单后确认：
+                {
+                  "intent": "cancel_order",
+                  "possible_intents": ["cancel_order"],
+                  "confidence": "HIGH",
+                  "entities": {"query_mode": "recent_orders", "order_count": "1"},
+                  "requires_human_confirmation": false,
+                  "human_confirmation_reason": "",
+                  "clarification_question": ""
                 }
                 """;
 

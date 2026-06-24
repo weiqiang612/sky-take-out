@@ -173,7 +173,8 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
                                         if (StringUtils.hasText(orderDishes)) {
                                             sb.append(", Items: ").append(orderDishes);
                                         }
-                                        sb.append(". Recommend this order as the default action target.");
+                                        sb.append(". Recommend this order as the default action target. ");
+                                        sb.append("Ask the user to confirm this candidate before calling any high-risk tool.");
                                         parts.add(sentence(sb.toString()));
                                     }
                                 }

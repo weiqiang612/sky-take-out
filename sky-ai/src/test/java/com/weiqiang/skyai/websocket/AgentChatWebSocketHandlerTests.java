@@ -167,6 +167,36 @@ class AgentChatWebSocketHandlerTests {
     }
 
     @Test
+    void resolvableOrderIntentShouldStreamEvenWhenClarificationQuestionExists() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper, rateLimitManager);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+        IntentRecognitionResult intentResult = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of(),
+                List.of(IntentType.CANCEL_ORDER),
+                "请提供订单号或更多信息。",
+                false,
+                null
+        );
+        when(agentChatService.recognizeIntent(eq("你直接查一下"), eq("conv-6"), eq("user-1"))).thenReturn(intentResult);
+        when(taskOrchestratorService.plan(any(), any(), any(), any())).thenReturn(TaskPlanningResult.notDecomposed());
+        when(agentChatService.streamChat(eq("你直接查一下"), eq("conv-6"), eq("user-1"), any(IntentRecognitionResult.class)))
+                .thenReturn(Flux.never());
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-6\",\"userId\":\"user-1\",\"message\":\"你直接查一下\"}"));
+
+        assertTrue(frames.isEmpty());
+        assertTrue(activeStreams(handler).containsKey("conv-6"));
+        verify(agentChatService).streamChat(eq("你直接查一下"), eq("conv-6"), eq("user-1"), any(IntentRecognitionResult.class));
+        verify(agentChatService, never()).writeTurn(eq("user-1"), eq("conv-6"), any(IntentRecognitionResult.class));
+    }
+
+    @Test
     void confirmationShouldReenterPlanExecutionForBatchCancel() throws Exception {
         AgentChatService agentChatService = mock(AgentChatService.class);
         TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);

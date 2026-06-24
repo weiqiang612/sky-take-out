@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.weiqiang.skyai.intent_recognition.model.IntentRecognitionResult;
 import com.weiqiang.skyai.intent_recognition.model.IntentType;
+import com.weiqiang.skyai.intent_recognition.model.TaskDomain;
 import com.weiqiang.skyai.task.TaskOrchestratorService;
 import com.weiqiang.skyai.task.model.TaskExecutionOutcome;
 import com.weiqiang.skyai.task.model.TaskPlanningResult;
@@ -126,7 +127,7 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         }
 
         // 需要澄清
-        if (StringUtils.hasText(preIntent.clarificationQuestion())) {
+        if (shouldStopForClarification(preIntent)) {
             sendToken(session, preIntent.clarificationQuestion());
             sendDone(session, preIntent);
             agentChatService.writeTurn(userId, conversationId, preIntent);
@@ -356,6 +357,14 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
 
     private void sendDone(WebSocketSession session, @Nullable IntentRecognitionResult intentResult) {
         send(session, new AgentChatDoneFrame("done", intentResult == null ? null : intentResult.intent().value()));
+    }
+
+    private boolean shouldStopForClarification(IntentRecognitionResult intentResult) {
+        if (intentResult == null || !StringUtils.hasText(intentResult.clarificationQuestion())) {
+            return false;
+        }
+        IntentType intentType = intentResult.intent();
+        return intentType == null || intentType.domain() != TaskDomain.ORDER;
     }
 
     private void sendError(WebSocketSession session, String message) {
