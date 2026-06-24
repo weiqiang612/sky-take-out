@@ -9,6 +9,7 @@ import com.weiqiang.skyai.task.model.TaskExecutionOutcome;
 import com.weiqiang.skyai.task.model.TaskPlan;
 import com.weiqiang.skyai.task.model.TaskStep;
 import com.weiqiang.skyai.task.model.TaskPlanningResult;
+import com.weiqiang.skyai.tools.gateway.OrderGateway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import com.weiqiang.skyai.config.RateLimitManager;
@@ -251,6 +252,200 @@ class AgentChatWebSocketHandlerTests {
         assertEquals("done", objectMapper.readTree(frames.get(frames.size() - 1)).path("type").asText());
         verify(taskOrchestratorService).plan(eq("取消这两个订单吧"), eq("conv-5"), eq("user-1"), any(IntentRecognitionResult.class));
         verify(taskOrchestratorService).executePlan(eq("取消这两个订单吧"), eq("conv-5"), eq("user-1"), any(IntentRecognitionResult.class), eq(plan));
+        verify(agentChatService, never()).streamChat(any(), any(), any(), any(IntentRecognitionResult.class));
+    }
+
+    @Test
+    void textAffirmationShouldConfirmPendingCancelWithoutIntentRecognition() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper, rateLimitManager);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+
+        IntentRecognitionResult pendingIntentResult = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_id", "1782272102430"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                true,
+                "请确认取消订单1782272102430。"
+        );
+        IntentRecognitionResult confirmedIntent = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_id", "1782272102430"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                false,
+                null
+        );
+        when(agentChatService.confirmedIntent(eq("cancel_order"), eq(pendingIntentResult))).thenReturn(confirmedIntent);
+        when(taskOrchestratorService.plan(eq("取消刚刚的订单"), eq("conv-7"), eq("user-1"), eq(confirmedIntent)))
+                .thenReturn(TaskPlanningResult.notDecomposed());
+        when(agentChatService.streamChat(eq("取消刚刚的订单"), eq("conv-7"), eq("user-1"), eq(confirmedIntent)))
+                .thenReturn(Flux.empty());
+
+        session.getAttributes().put("pendingQuestion", "取消刚刚的订单");
+        session.getAttributes().put("pendingIntent", "cancel_order");
+        session.getAttributes().put("pendingIntentResult", pendingIntentResult);
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-7\",\"userId\":\"user-1\",\"message\":\"好的，谢谢\"}"));
+
+        assertEquals("done", objectMapper.readTree(frames.get(0)).path("type").asText());
+        assertEquals("cancel_order", objectMapper.readTree(frames.get(0)).path("intent").asText());
+        assertNull(session.getAttributes().get("pendingQuestion"));
+        assertNull(session.getAttributes().get("pendingIntent"));
+        assertNull(session.getAttributes().get("pendingIntentResult"));
+        verify(taskOrchestratorService, never()).abandon(any());
+        verify(agentChatService, never()).recognizeIntent(any(), any(), any());
+        verify(agentChatService).streamChat(eq("取消刚刚的订单"), eq("conv-7"), eq("user-1"), eq(confirmedIntent));
+    }
+
+    @Test
+    void textRejectionShouldClearPendingCancelWithoutExecuting() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper, rateLimitManager);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+
+        IntentRecognitionResult pendingIntentResult = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_id", "1782272102430"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                true,
+                "请确认取消订单1782272102430。"
+        );
+        session.getAttributes().put("pendingQuestion", "取消刚刚的订单");
+        session.getAttributes().put("pendingIntent", "cancel_order");
+        session.getAttributes().put("pendingIntentResult", pendingIntentResult);
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-8\",\"userId\":\"user-1\",\"message\":\"不用了，先别取消\"}"));
+
+        assertEquals("token", objectMapper.readTree(frames.get(0)).path("type").asText());
+        assertEquals("已取消本次操作。", objectMapper.readTree(frames.get(0)).path("content").asText());
+        assertEquals("done", objectMapper.readTree(frames.get(1)).path("type").asText());
+        assertEquals("cancel_order", objectMapper.readTree(frames.get(1)).path("intent").asText());
+        assertNull(session.getAttributes().get("pendingQuestion"));
+        assertNull(session.getAttributes().get("pendingIntent"));
+        assertNull(session.getAttributes().get("pendingIntentResult"));
+        verify(taskOrchestratorService, never()).abandon(any());
+        verify(agentChatService, never()).recognizeIntent(any(), any(), any());
+        verify(agentChatService, never()).streamChat(any(), any(), any(), any(IntentRecognitionResult.class));
+    }
+
+    @Test
+    void negativeTextContainingAffirmationWordShouldRejectPendingCancel() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper, rateLimitManager);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+
+        IntentRecognitionResult pendingIntentResult = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_id", "1782272102430"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                true,
+                "请确认取消订单1782272102430。"
+        );
+        session.getAttributes().put("pendingQuestion", "取消刚刚的订单");
+        session.getAttributes().put("pendingIntent", "cancel_order");
+        session.getAttributes().put("pendingIntentResult", pendingIntentResult);
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-11\",\"userId\":\"user-1\",\"message\":\"不对\"}"));
+
+        assertEquals("已取消本次操作。", objectMapper.readTree(frames.get(0)).path("content").asText());
+        assertNull(session.getAttributes().get("pendingIntent"));
+        verify(agentChatService, never()).confirmedIntent(any(), any());
+        verify(agentChatService, never()).streamChat(any(), any(), any(), any(IntentRecognitionResult.class));
+    }
+
+    @Test
+    void textAffirmationWithoutPendingConfirmationShouldUseNormalIntentRecognition() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper, rateLimitManager);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+        IntentRecognitionResult intentResult = new IntentRecognitionResult(
+                IntentType.OTHER,
+                ConfidenceLevel.HIGH,
+                Map.of(),
+                List.of(IntentType.OTHER),
+                null,
+                false,
+                null
+        );
+        when(agentChatService.recognizeIntent(eq("好的，谢谢"), eq("conv-9"), eq("user-1"))).thenReturn(intentResult);
+        when(agentChatService.otherIntentResponse(intentResult)).thenReturn("请补充一下你的具体诉求。");
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-9\",\"userId\":\"user-1\",\"message\":\"好的，谢谢\"}"));
+
+        assertEquals("token", objectMapper.readTree(frames.get(0)).path("type").asText());
+        assertEquals("请补充一下你的具体诉求。", objectMapper.readTree(frames.get(0)).path("content").asText());
+        verify(agentChatService).recognizeIntent(eq("好的，谢谢"), eq("conv-9"), eq("user-1"));
+    }
+
+    @Test
+    void cancelOrderWithoutOrderIdShouldCreateConfirmationForLatestOrder() throws Exception {
+        AgentChatService agentChatService = mock(AgentChatService.class);
+        TaskOrchestratorService taskOrchestratorService = mock(TaskOrchestratorService.class);
+        OrderGateway orderGateway = mock(OrderGateway.class);
+        AgentChatWebSocketHandler handler = new AgentChatWebSocketHandler(agentChatService, taskOrchestratorService, objectMapper, rateLimitManager, orderGateway);
+        WebSocketSession session = mockSession();
+        List<String> frames = new ArrayList<>();
+        captureFrames(session, frames);
+        IntentRecognitionResult intentResult = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of(),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                false,
+                null
+        );
+        IntentRecognitionResult candidateIntent = new IntentRecognitionResult(
+                IntentType.CANCEL_ORDER,
+                ConfidenceLevel.HIGH,
+                Map.of("order_id", "1782272102430"),
+                List.of(IntentType.CANCEL_ORDER),
+                null,
+                true,
+                "请确认是否取消最近订单 1782272102430。"
+        );
+        when(agentChatService.recognizeIntent(eq("取消刚刚的订单"), eq("conv-10"), eq("user-1"))).thenReturn(intentResult);
+        when(orderGateway.listRecentOrders("user-1", 1)).thenReturn(
+                "{\"records\":[{\"id\":1001,\"number\":\"1782272102430\",\"amount\":28.8,\"orderDishes\":\"大煮干丝 x1、米饭 x1\"}]}"
+        );
+        when(agentChatService.confirmationFrame(eq(candidateIntent))).thenReturn(
+                new com.weiqiang.skyai.websocket.model.AgentChatConfirmationFrame(
+                        "confirmation",
+                        "cancel_order",
+                        "1782272102430",
+                        "请确认是否取消最近订单 1782272102430。",
+                        "This action requires human confirmation."
+                )
+        );
+
+        handler.handleTextMessage(session, new TextMessage("{\"conversationId\":\"conv-10\",\"userId\":\"user-1\",\"message\":\"取消刚刚的订单\"}"));
+
+        assertEquals("confirmation", objectMapper.readTree(frames.get(0)).path("type").asText());
+        assertEquals("cancel_order", objectMapper.readTree(frames.get(0)).path("intent").asText());
+        assertEquals("1782272102430", objectMapper.readTree(frames.get(0)).path("orderId").asText());
+        assertEquals("取消刚刚的订单", session.getAttributes().get("pendingQuestion"));
+        assertEquals("cancel_order", session.getAttributes().get("pendingIntent"));
+        assertEquals(candidateIntent, session.getAttributes().get("pendingIntentResult"));
         verify(agentChatService, never()).streamChat(any(), any(), any(), any(IntentRecognitionResult.class));
     }
 

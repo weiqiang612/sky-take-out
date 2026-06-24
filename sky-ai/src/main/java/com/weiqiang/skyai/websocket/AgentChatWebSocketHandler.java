@@ -8,6 +8,7 @@ import com.weiqiang.skyai.intent_recognition.model.TaskDomain;
 import com.weiqiang.skyai.task.TaskOrchestratorService;
 import com.weiqiang.skyai.task.model.TaskExecutionOutcome;
 import com.weiqiang.skyai.task.model.TaskPlanningResult;
+import com.weiqiang.skyai.tools.gateway.OrderGateway;
 import com.weiqiang.skyai.websocket.model.AgentChatCancelledFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatConfirmationFrame;
 import com.weiqiang.skyai.websocket.model.AgentChatDoneFrame;
@@ -20,6 +21,7 @@ import com.weiqiang.skyai.websocket.model.AgentChatTokenFrame;
 import com.weiqiang.skyai.config.RateLimitManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -32,6 +34,8 @@ import reactor.core.Disposable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -43,21 +47,37 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
     private static final String ACTIVE_CONVERSATION_ID_KEY = "activeConversationId";
     private static final String CANCEL_TYPE = "cancel";
     private static final String PLAN_CONFIRM_INTENT = "task_plan";
+    private static final String ORDER_ID_ENTITY = "order_id";
+    private static final String ORDER_IDS_ENTITY = "order_ids";
+    private static final String RECENT_ORDER_CONFIRMATION_REASON_TEMPLATE = "请确认是否%s最近订单 %s。";
+    private static final String CANCEL_PENDING_OPERATION_MESSAGE = "已取消本次操作。";
 
     private final AgentChatService agentChatService;
     private final TaskOrchestratorService taskOrchestratorService;
     private final ObjectMapper objectMapper;
     private final RateLimitManager rateLimitManager;
+    @Nullable
+    private final OrderGateway orderGateway;
     private final ConcurrentHashMap<String, Disposable> activeStreams = new ConcurrentHashMap<>();
 
     public AgentChatWebSocketHandler(AgentChatService agentChatService,
                                      TaskOrchestratorService taskOrchestratorService,
                                      ObjectMapper objectMapper,
                                      RateLimitManager rateLimitManager) {
+        this(agentChatService, taskOrchestratorService, objectMapper, rateLimitManager, null);
+    }
+
+    @Autowired
+    public AgentChatWebSocketHandler(AgentChatService agentChatService,
+                                     TaskOrchestratorService taskOrchestratorService,
+                                     ObjectMapper objectMapper,
+                                     RateLimitManager rateLimitManager,
+                                     @Nullable OrderGateway orderGateway) {
         this.agentChatService = agentChatService;
         this.taskOrchestratorService = taskOrchestratorService;
         this.objectMapper = objectMapper;
         this.rateLimitManager = rateLimitManager;
+        this.orderGateway = orderGateway;
     }
 
     @Override
@@ -115,6 +135,10 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        if (handlePendingConfirmationText(session, request)) {
+            return;
+        }
+
         // If there's an active stream for the conversation, abandon it before starting a new one
         taskOrchestratorService.abandon(conversationId);
         IntentRecognitionResult preIntent = agentChatService.recognizeIntent(request.message(), conversationId, userId);
@@ -133,6 +157,8 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
             agentChatService.writeTurn(userId, conversationId, preIntent);
             return;
         }
+
+        preIntent = withRecentOrderCandidate(preIntent, userId);
 
         // 需要人确认
         if (preIntent.requiresHumanConfirmation()) {
@@ -253,6 +279,159 @@ public class AgentChatWebSocketHandler extends TextWebSocketHandler {
         }
 
         startStreaming(session, pendingQuestion, conversationId, userId, confirmedIntent);
+    }
+
+    private boolean handlePendingConfirmationText(WebSocketSession session, AgentChatRequest request) {
+        String pendingIntent = safeText((String) getSessionAttribute(session, PENDING_INTENT_KEY));
+        IntentRecognitionResult pendingIntentResult =
+                (IntentRecognitionResult) getSessionAttribute(session, PENDING_INTENT_RESULT_KEY);
+        if (!StringUtils.hasText(pendingIntent) || pendingIntentResult == null || PLAN_CONFIRM_INTENT.equalsIgnoreCase(pendingIntent)) {
+            return false;
+        }
+        if (isRejection(request.message())) {
+            removeSessionAttribute(session, PENDING_QUESTION_KEY);
+            removeSessionAttribute(session, PENDING_INTENT_KEY);
+            removeSessionAttribute(session, PENDING_INTENT_RESULT_KEY);
+            sendToken(session, CANCEL_PENDING_OPERATION_MESSAGE);
+            sendDone(session, pendingIntentResult);
+            return true;
+        }
+        if (isAffirmation(request.message(), pendingIntent)) {
+            AgentChatRequest confirmationRequest = new AgentChatRequest(
+                    request.conversationId(),
+                    request.userId(),
+                    request.message(),
+                    true,
+                    pendingIntent
+            );
+            handleConfirmation(session, confirmationRequest);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isAffirmation(String message, String pendingIntent) {
+        String text = normalizeUserText(message);
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        if (text.contains("确认") || text.contains("确定") || text.contains("好的") || text.contains("好")
+                || text.contains("可以") || text.contains("是的") || text.contains("对") || text.contains("就这个")
+                || text.contains("就是这个") || text.contains("嗯") || text.contains("行")) {
+            return true;
+        }
+        if (IntentType.CANCEL_ORDER.value().equalsIgnoreCase(pendingIntent)) {
+            return text.contains("取消那个") || text.contains("取消这个") || text.contains("取消刚刚")
+                    || text.contains("取消吧") || text.contains("帮我取消");
+        }
+        if (IntentType.REQUEST_REFUND.value().equalsIgnoreCase(pendingIntent)) {
+            return text.contains("退那个") || text.contains("退这个") || text.contains("退款吧")
+                    || text.contains("帮我退");
+        }
+        return false;
+    }
+
+    private boolean isRejection(String message) {
+        String text = normalizeUserText(message);
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        return text.contains("不用") || text.contains("不要") || text.contains("别") || text.contains("算了")
+                || text.contains("先不") || text.contains("不取消") || text.contains("不要取消")
+                || text.contains("不退") || text.contains("不要退") || text.contains("不对")
+                || text.contains("不行") || text.contains("不是") || text.contains("不好");
+    }
+
+    private String normalizeUserText(String message) {
+        if (!StringUtils.hasText(message)) {
+            return "";
+        }
+        return message.trim()
+                .replaceAll("[\\s,，。.!！?？;；~～、]", "")
+                .toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private IntentRecognitionResult withRecentOrderCandidate(IntentRecognitionResult intentResult, String userId) {
+        if (!shouldResolveLatestOrderCandidate(intentResult, userId)) {
+            return intentResult;
+        }
+        String latestOrderNumber = latestOrderNumber(userId);
+        if (!StringUtils.hasText(latestOrderNumber)) {
+            return intentResult;
+        }
+        Map<String, String> entities = new LinkedHashMap<>();
+        if (intentResult.entities() != null) {
+            entities.putAll(intentResult.entities());
+        }
+        entities.put(ORDER_ID_ENTITY, latestOrderNumber);
+        String action = intentResult.intent() == IntentType.REQUEST_REFUND ? "申请退款" : "取消";
+        return new IntentRecognitionResult(
+                intentResult.intent(),
+                intentResult.confidence(),
+                entities,
+                intentResult.possibleIntents(),
+                null,
+                true,
+                RECENT_ORDER_CONFIRMATION_REASON_TEMPLATE.formatted(action, latestOrderNumber)
+        );
+    }
+
+    private boolean shouldResolveLatestOrderCandidate(IntentRecognitionResult intentResult, String userId) {
+        if (intentResult == null || intentResult.intent() == null || !StringUtils.hasText(userId) || orderGateway == null) {
+            return false;
+        }
+        if (intentResult.intent() != IntentType.CANCEL_ORDER && intentResult.intent() != IntentType.REQUEST_REFUND) {
+            return false;
+        }
+        return !hasOrderReference(intentResult);
+    }
+
+    private boolean hasOrderReference(IntentRecognitionResult intentResult) {
+        if (intentResult.entities() == null || intentResult.entities().isEmpty()) {
+            return false;
+        }
+        if (StringUtils.hasText(intentResult.entities().get(ORDER_ID_ENTITY))
+                || StringUtils.hasText(intentResult.entities().get(ORDER_IDS_ENTITY))) {
+            return true;
+        }
+        return intentResult.entities().entrySet().stream()
+                .anyMatch(entry -> entry.getKey() != null
+                        && entry.getKey().matches("order_id_\\d+")
+                        && StringUtils.hasText(entry.getValue()));
+    }
+
+    private String latestOrderNumber(String userId) {
+        try {
+            String recentOrdersJson = orderGateway.listRecentOrders(userId, 1);
+            if (!StringUtils.hasText(recentOrdersJson) || recentOrdersJson.startsWith("FAIL:")) {
+                return "";
+            }
+            JsonNode root = objectMapper.readTree(recentOrdersJson);
+            JsonNode latestOrder = latestOrder(root);
+            if (latestOrder == null) {
+                return "";
+            }
+            return safeText(latestOrder.path("number").asText(""));
+        } catch (Exception ex) {
+            log.warn("Failed to resolve latest order candidate for confirmation", ex);
+            return "";
+        }
+    }
+
+    @Nullable
+    private JsonNode latestOrder(JsonNode root) {
+        if (root == null || root.isMissingNode() || root.isNull()) {
+            return null;
+        }
+        JsonNode data = root.has("data") ? root.path("data") : root;
+        JsonNode records = data.path("records");
+        if (records.isArray() && records.size() > 0) {
+            return records.get(0);
+        }
+        if (data.isArray() && data.size() > 0) {
+            return data.get(0);
+        }
+        return null;
     }
 
     private void sendPlanOutcome(WebSocketSession session, TaskExecutionOutcome outcome, IntentRecognitionResult intentResult) {
