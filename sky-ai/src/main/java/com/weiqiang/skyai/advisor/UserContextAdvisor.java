@@ -21,6 +21,7 @@ import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -54,6 +55,7 @@ public class UserContextAdvisor implements CallAdvisor, StreamAdvisor {
         this(userMemoryFactService, userProfileMemoryProperties, userProfileInjectionMetrics, null, new ObjectMapper());
     }
 
+    @Autowired
     public UserContextAdvisor(UserMemoryFactService userMemoryFactService,
                               UserProfileMemoryProperties userProfileMemoryProperties,
                               UserProfileInjectionMetrics userProfileInjectionMetrics,
